@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>All-in-One Fantasy Dashboard</title>
+<style>
+  :root{--bg:#0b0f16;--bg2:#111722;--card:#161d2a;--card2:#1d2636;--ink:#f2f6fb;--mut:#8f9cb0;
+        --line:#28313f;--grn:#33e08a;--red:#ff6060;--yel:#ffd23f;--blu:#4aa8ff;--vio:#b878ff;--gold:#ffcf3f;}
+  *{box-sizing:border-box}
+  html,body{max-width:100%;overflow-x:hidden}
+  body{margin:0;font:16px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+       background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+  header{padding:16px;text-align:center;background:linear-gradient(180deg,#121a26,#0c1119);
+         border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
+  h1{font-size:20px;margin:0;font-weight:800;letter-spacing:.3px}
+  .sub{color:var(--mut);font-size:12.5px;margin-top:3px}
+  .wrap{max-width:900px;margin:0 auto;padding:14px}
+
+  .tabs{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:12px}
+  .tabs .tab{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:999px;
+       font-size:13.5px;font-weight:800;color:var(--mut);background:#0d131c;border:1px solid var(--line)}
+  .tabs .tab.active{color:#04121f;background:var(--blu);border-color:var(--blu)}
+  .tabs .tab.soon{opacity:.45}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+  .lg-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;flex-wrap:wrap}
+  .lg-name{font-size:17px;font-weight:800}
+  .lg-meta{color:var(--mut);font-size:12px}
+  .lg-rec{font-size:13px;font-weight:800;color:var(--blu);white-space:nowrap}
+  .badge{display:inline-block;font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;
+         background:rgba(255,207,63,.16);color:var(--gold);border:1px solid var(--gold);margin-left:6px;vertical-align:middle}
+
+  /* view toggle within a league card */
+  .vtabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px}
+  .vtabs button{flex:0 0 auto;padding:7px 13px;border-radius:9px;font-size:12.5px;font-weight:800;cursor:pointer;
+       background:#0d131c;border:1px solid var(--line);color:var(--mut);min-height:38px}
+  .vtabs button.on{background:var(--blu);border-color:var(--blu);color:#04121f}
+  .vpane{display:none} .vpane.on{display:block}
+
+  /* matchup strip */
+  .mu{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;
+      background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:11px 12px;margin:12px 0}
+  .mu-side{min-width:0}
+  .mu-side.me .mu-team{color:var(--grn)}
+  .mu-team{font-weight:800;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mu-sub{color:var(--mut);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mu-pts{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px}
+  .mu-side.right{text-align:right}
+  .mu-vs{color:var(--mut);font-size:11px;font-weight:800;text-align:center}
+  .mu-lead .mu-pts{color:var(--grn)}
+
+  .sh{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);font-weight:800;margin:14px 0 8px}
+  .roster{display:flex;flex-direction:column;gap:3px}
+  .pl{display:grid;grid-template-columns:46px 1fr auto;gap:10px;align-items:center;
+      padding:7px 10px;background:var(--bg);border:1px solid var(--line);border-radius:9px}
+  .pl.bench{background:transparent;border-color:transparent;padding:5px 10px}
+  .slot{font-size:10px;font-weight:800;color:var(--mut);text-align:center;background:#0d131c;
+        border:1px solid var(--line);border-radius:6px;padding:3px 2px}
+  .slot.FLEX,.slot.SUPER_FLEX,.slot.IDP_FLEX,.slot.WRRB_FLEX,.slot.REC_FLEX{color:var(--yel)}
+  .slot.BN{color:var(--mut);opacity:.7} .slot.IR,.slot.TAXI{color:var(--red);opacity:.85}
+  .pname{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .pmeta{color:var(--mut);font-size:11px;font-weight:600}
+  .ppos{font-size:11px;font-weight:800;color:var(--mut);white-space:nowrap}
+  .psal{font-size:12px;font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .psal.verify{color:var(--mut)}
+  .pos-QB{color:#f0913e}.pos-RB{color:#33e08a}.pos-WR{color:#4aa8ff}.pos-TE{color:#b878ff}
+  .pos-K{color:#95a5a6}.pos-DEF{color:#ff6060}.pos-DL{color:#e0679a}.pos-LB{color:#67c7e0}.pos-DB{color:#c7e067}
+  .empty-slot{color:var(--mut);font-style:italic;font-size:13px}
+
+  /* standings + all-teams */
+  .stand{display:flex;flex-direction:column;gap:4px}
+  .st-row{display:grid;grid-template-columns:22px 1fr auto auto;gap:10px;align-items:center;
+          padding:7px 10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;font-size:13px}
+  .st-row.me{border-color:var(--grn);background:rgba(51,224,138,.06)}
+  .st-rk{color:var(--mut);font-weight:800;text-align:center}
+  .st-team{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .st-sub{color:var(--mut);font-weight:600;font-size:11px}
+  .st-rec{color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .st-pf{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+  details.tm{background:var(--bg);border:1px solid var(--line);border-radius:9px;margin-bottom:6px}
+  details.tm>summary{cursor:pointer;list-style:none;padding:9px 11px;display:grid;
+       grid-template-columns:22px 1fr auto auto;gap:10px;align-items:center;font-size:13px}
+  details.tm>summary::-webkit-details-marker{display:none}
+  details.tm.me{border-color:var(--grn)}
+  details.tm .tmbody{padding:0 11px 10px}
+
+  /* analyzer */
+  .an-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px 12px}
+  .stat .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-weight:800}
+  .stat .v{font-size:16px;font-weight:800;margin-top:3px}
+  .stat .d{font-size:11.5px;color:var(--mut);margin-top:2px;line-height:1.4}
+  .stat.me{border-color:var(--grn)}
+  .stat.flag{border-color:var(--yel)}
+  .an-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px dotted rgba(40,49,63,.5);font-size:13px}
+  .an-row:last-child{border-bottom:none}
+  .an-row .lab{color:var(--mut)} .an-row .val{font-weight:800;font-variant-numeric:tabular-nums}
+  .an-note{font-size:11.5px;color:var(--mut);line-height:1.5;margin-top:8px}
+  .an-skip{font-size:11.5px;color:var(--mut);background:var(--bg);border:1px dashed var(--line);
+           border-radius:9px;padding:9px 11px;margin-top:10px}
+  .an-skip b{color:var(--ink)}
+  .capbar{height:8px;border-radius:5px;background:#0d131c;border:1px solid var(--line);overflow:hidden;margin-top:5px}
+  .capbar .fill{height:100%;background:linear-gradient(90deg,var(--grn),var(--yel))}
+  .capbar .fill.over{background:var(--red)}
+
+  details.more{margin-top:6px}
+  details.more>summary{cursor:pointer;color:var(--blu);font-size:12.5px;font-weight:800;list-style:none;padding:4px 0}
+  details.more>summary::-webkit-details-marker{display:none}
+  details.more>summary::after{content:" ▾"}
+  details.more[open]>summary::after{content:" ▴"}
+
+  .note{color:var(--mut);font-size:11.5px;text-align:center;margin:6px 0}
+  .err{background:rgba(255,96,96,.12);border:1px solid var(--red);color:var(--ink);
+       padding:12px;border-radius:10px;font-size:13px;margin-bottom:12px}
+  .loading{color:var(--mut);text-align:center;padding:30px;font-size:14px}
+
+  @media (max-width:640px){
+    .wrap{padding:10px}
+    h1{font-size:17px}
+    .card{padding:12px}
+    .lg-name{font-size:16px}
+    .mu-team{font-size:12.5px}.mu-pts{font-size:19px}
+    .pl{grid-template-columns:42px 1fr auto;gap:8px;padding:6px 8px}
+    .pname{font-size:13.5px}
+    .st-row{font-size:12.5px}
+    .tabs .tab{padding:9px 14px}
+    .an-grid{grid-template-columns:1fr}
+    details.tm>summary{grid-template-columns:20px 1fr auto auto;gap:8px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏈 All-in-One Fantasy Dashboard</h1>
+  <div class="sub" id="subhead">Loading…</div>
+  <nav class="tabs">
+    <span class="tab active">🟢 Sleeper</span>
+    <span class="tab soon" title="Coming in a later phase (serverless backend)">ESPN · soon</span>
+    <span class="tab soon" title="Coming in a later phase (serverless backend)">Yahoo · soon</span>
+  </nav>
+</header>
+
+<div class="wrap">
+  <div id="errbox"></div>
+  <div id="leagues"><div class="loading">Loading your Sleeper leagues…</div></div>
+  <div class="note" id="foot"></div>
+</div>
+
+<script>
+/* ============================================================================
+   ALL-IN-ONE FANTASY DASHBOARD — Phase 1: SLEEPER (public API, no auth).
+   Static site (GitHub Pages). Provider abstraction lets ESPN + Yahoo slot in
+   as later phases via a serverless backend (secrets server-side, never here).
+   ============================================================================ */
+
+const CONFIG = {
+  sleeper: {
+    username: "JunceBoxes",
+    season: "2026",
+    leagueOrder: ["1396295869136932864","1386766016129818624","1372256037666574336"],
+    // leagues that use an auction salary cap -> show per-player $ + team cap totals
+    salaryLeagues: { "1372256037666574336": { cap: 365, floor: 1 } },
+  },
+  espn:  { enabled:false /* Phase 2: espn_s2+SWID -> serverless env vars, NOT here */ },
+  yahoo: { enabled:false /* Phase 3: OAuth -> serverless */ },
+};
+
+async function getJSON(url){
+  const r = await fetch(url, {cache:"no-store"});
+  if(!r.ok) throw new Error(url.split("/v1/")[1] + " → HTTP " + r.status);
+  return r.json();
+}
+
+/* ============================================================================
+   PROVIDER ABSTRACTION — each provider.load() returns normalized leagues:
+     { provider, leagueId, name, seasonWeek, roster_positions, salary?,
+       me:{...}, matchup:{...}, standings:[...], teams:[...], analyzer:{...} }
+   ============================================================================ */
+const providers = {};
+
+providers.sleeper = (function(){
+  const API = "https://api.sleeper.app/v1";
+  const PK="sleeper_players_nfl_v1", TK="sleeper_players_nfl_ts", TTL=1000*60*60*24;
+
+  async function loadPlayers(){
+    try{ const ts=+(localStorage.getItem(TK)||0), c=localStorage.getItem(PK);
+      if(c && (Date.now()-ts)<TTL) return JSON.parse(c); }catch(e){}
+    const players = await getJSON(API+"/players/nfl");
+    const slim={};
+    for(const id in players){ const p=players[id]; if(!p) continue;
+      slim[id]={ n:p.full_name||((p.first_name||"")+" "+(p.last_name||"")).trim()||id, p:p.position||"", t:p.team||"" }; }
+    try{ localStorage.setItem(PK,JSON.stringify(slim)); localStorage.setItem(TK,String(Date.now())); }catch(e){}
+    return slim;
+  }
+  function resolvePlayer(pmap,id){ if(!id||id==="0"||id===0) return null;
+    const p=pmap[id]; return p?{id,name:p.n,pos:p.p,team:p.t}:{id,name:String(id),pos:"",team:""}; }
+  function teamNameOf(u){ return u ? ((u.metadata&&u.metadata.team_name)||u.display_name||"Team") : "Unknown"; }
+  function ownerNameOf(u){ return u ? (u.display_name||"?") : "?"; }
+  const fptsOf = r => (r.settings.fpts||0) + (r.settings.fpts_decimal? r.settings.fpts_decimal/100 : 0);
+  const paOf   = r => (r.settings.fpts_against||0) + (r.settings.fpts_against_decimal? r.settings.fpts_against_decimal/100 : 0);
+
+  // ---- salary map (auction leagues): player_id -> $amount.
+  // Dynasty carryover: a player's price may come from THIS season's offseason auction OR an
+  // earlier initial auction. Merge ALL auction drafts (newest wins on conflict) so kept players
+  // keep their real price and only true pickups/undrafted fall to the $1 floor. ----
+  async function loadSalaries(leagueId){
+    try{
+      const drafts = await getJSON(`${API}/league/${leagueId}/drafts`);
+      if(!drafts || !drafts.length) return null;
+      const auctions = drafts.filter(d=>d.type==="auction");
+      if(!auctions.length) return null;
+      // sort OLDEST first so newer prices overwrite older ones
+      auctions.sort((a,b)=>(a.start_time||0)-(b.start_time||0));
+      const map = {};
+      for(const d of auctions){
+        const picks = await getJSON(`${API}/draft/${d.draft_id}/picks`).catch(()=>[]);
+        picks.forEach(p=>{ const amt=p.metadata && p.metadata.amount;
+          if(p.player_id!=null && amt!=null && amt!=="") map[String(p.player_id)] = parseInt(amt,10); });
+      }
+      return map;
+    }catch(e){ return null; }
+  }
+
+  // ---- transactions across weeks 1..current (FAAB / adds / trades) ----
+  async function loadTransactions(leagueId, week){
+    const all=[];
+    const weeks=[]; for(let w=1; w<=Math.max(1,week); w++) weeks.push(w);
+    const results = await Promise.all(weeks.map(w=>getJSON(`${API}/league/${leagueId}/transactions/${w}`).catch(()=>[])));
+    results.forEach(list=>{ if(Array.isArray(list)) list.forEach(t=>all.push(t)); });
+    return all;
+  }
+
+  // build a team object (roster + resolved starters/bench + optional salary)
+  function buildTeam(r, roster_positions, usersById, pmap, salaryMap, salaryCfg){
+    const starterSlots = roster_positions.filter(p=>p!=="BN"&&p!=="IR"&&p!=="TAXI");
+    const startIds = (r.starters||[]).map(String);
+    const starters = (r.starters||[]).map((pid,i)=>({ slot: starterSlots[i]||"FLEX", player: resolvePlayer(pmap,pid) }));
+    const startSet = new Set(startIds);
+    const reserveSet = new Set([...(r.reserve||[]),...(r.taxi||[])].map(String));
+    const bench = (r.players||[]).filter(pid=>!startSet.has(String(pid)))
+      .map(pid=>({ player:resolvePlayer(pmap,pid), reserve:reserveSet.has(String(pid)) })).filter(x=>x.player);
+    // salary
+    let salary=null;
+    if(salaryMap && salaryCfg){
+      const priced = (r.players||[]).map(pid=>{
+        const known = salaryMap[String(pid)]!=null;
+        const amt = known ? salaryMap[String(pid)] : salaryCfg.floor;   // pickup/unknown -> floor $1
+        return { pid:String(pid), amt, known };
+      });
+      const total = priced.reduce((s,x)=>s+x.amt,0);
+      const salById = {}; priced.forEach(x=>salById[x.pid]={amt:x.amt,known:x.known});
+      salary = { total, cap:salaryCfg.cap, byId:salById, unknownCount: priced.filter(x=>!x.known).length };
+    }
+    const u=usersById[r.owner_id];
+    return {
+      roster_id:r.roster_id, owner:ownerNameOf(u), teamName:teamNameOf(u),
+      record:{ w:r.settings.wins||0, l:r.settings.losses||0, t:r.settings.ties||0 },
+      pf:fptsOf(r), pa:paOf(r), moves:r.settings.total_moves||0, faabUsed:r.settings.waiver_budget_used||0,
+      starters, bench, salary, players:(r.players||[]).map(String),
+    };
+  }
+
+  /* ---- ANALYZER: lineup shapes, transactions/FAAB, scoring, my-team-vs-league.
+     All derived from real fields; anything the API can't support is listed in `skips`. ---- */
+  function analyze(teams, matchups, roster_positions, transactions, week, mineRosterId, faabBudget){
+    const skips=[];
+    // count starter positions per team (lineup shape). Uses roster_positions labels via slot.
+    const posOf = s => s.player ? s.player.pos : "";
+    const shapes = teams.map(t=>{
+      const c={};
+      t.starters.forEach(s=>{ const p=posOf(s); if(p) c[p]=(c[p]||0)+1; });
+      const shapeKey = ["QB","RB","WR","TE","K","DEF","DL","LB","DB"].filter(p=>c[p]).map(p=>c[p]+p).join(" ");
+      return { roster_id:t.roster_id, teamName:t.teamName, counts:c, shapeKey, isMe:t.roster_id===mineRosterId };
+    });
+    // most common shape + flag teams that deviate
+    const shapeCounts={}; shapes.forEach(s=>shapeCounts[s.shapeKey]=(shapeCounts[s.shapeKey]||0)+1);
+    const commonShape = Object.entries(shapeCounts).sort((a,b)=>b[1]-a[1])[0];
+    const unusual = shapes.filter(s=>shapeCounts[s.shapeKey]===1 && shapes.length>2);
+
+    // per-position "who starts the most X" quirks (e.g. only team starting 2 TE)
+    const quirks=[];
+    ["QB","RB","WR","TE","K","DL","LB","DB"].forEach(pos=>{
+      const withCount = shapes.map(s=>({t:s.teamName,isMe:s.isMe,n:s.counts[pos]||0}));
+      const max=Math.max(...withCount.map(x=>x.n));
+      const top=withCount.filter(x=>x.n===max && max>0);
+      if(top.length===1 && max>=2){ quirks.push(`${top[0].t} is the only team starting ${max} ${pos}${top[0].isMe?" (you)":""}`); }
+    });
+
+    // scoring/matchup (only meaningful once games have points)
+    let scoring=null;
+    if(matchups && matchups.length){
+      const played = matchups.some(m=>(m.points||0)>0);
+      if(played){
+        const byTeam = matchups.map(m=>{
+          const t=teams.find(x=>x.roster_id===m.roster_id);
+          const starterPts = (m.starters_points||[]).reduce((s,v)=>s+(v||0),0);
+          const allPts = m.players_points ? Object.values(m.players_points).reduce((s,v)=>s+(v||0),0) : starterPts;
+          const benchPts = Math.max(0, allPts - starterPts);
+          return { teamName:t?t.teamName:("R"+m.roster_id), isMe:m.roster_id===mineRosterId,
+                   points:m.points||0, benchPts };
+        });
+        byTeam.sort((a,b)=>b.points-a.points);
+        scoring = {
+          top: byTeam[0], low: byTeam[byTeam.length-1],
+          mostOnBench: byTeam.slice().sort((a,b)=>b.benchPts-a.benchPts)[0],
+          me: byTeam.find(x=>x.isMe) || null,
+          all: byTeam,
+        };
+      }
+    }
+
+    // transactions / FAAB
+    let tx=null;
+    if(transactions){
+      const done = transactions.filter(t=>t.status==="complete");
+      const adds=done.filter(t=>t.type==="free_agent"||t.type==="waiver").length;
+      const trades=done.filter(t=>t.type==="trade").length;
+      const byRoster={};
+      done.forEach(t=>(t.roster_ids||[]).forEach(rid=>byRoster[rid]=(byRoster[rid]||0)+1));
+      // FAAB spent from roster settings (season-to-date) — reliable
+      const faab = teams.map(t=>({teamName:t.teamName,isMe:t.roster_id===mineRosterId,spent:t.faabUsed,
+                    left:(faabBudget!=null?faabBudget-t.faabUsed:null)}))
+                    .sort((a,b)=>b.spent-a.spent);
+      const busiest = teams.map(t=>({teamName:t.teamName,isMe:t.roster_id===mineRosterId,moves:t.moves}))
+                    .sort((a,b)=>b.moves-a.moves)[0];
+      tx = { totalMoves: done.length, adds, trades, faab, busiest, faabBudget };
+    }
+
+    // my-team-vs-league depth ranks
+    let mine=null;
+    if(mineRosterId!=null){
+      const me = teams.find(t=>t.roster_id===mineRosterId);
+      if(me){
+        const rankBy=(key,dir)=>{ const arr=teams.slice().sort((a,b)=>dir*(b[key]-a[key]));
+          return arr.findIndex(t=>t.roster_id===mineRosterId)+1; };
+        // depth: count rostered players by position (bench + starters)
+        const myShape = shapes.find(s=>s.roster_id===mineRosterId);
+        mine = {
+          pfRank: rankBy("pf",1), paRank: rankBy("pa",1),
+          rosterSize: me.players.length, shape: myShape?myShape.shapeKey:"",
+          movesRank: (teams.slice().sort((a,b)=>b.moves-a.moves).findIndex(t=>t.roster_id===mineRosterId)+1),
+        };
+      }
+    }
+
+    // record honest skips (things the API can't support / not yet meaningful)
+    if(!scoring) skips.push("Scoring/boom-bust & points-left-on-bench: waiting on games to be played (Week "+week+" not scored yet).");
+    skips.push("Trade win/loss grading & projections: not provided by Sleeper's API (would require external projections).");
+
+    return { shapes, commonShape, unusual, quirks, scoring, tx, mine, skips, teamsCount:teams.length };
+  }
+
+  async function load(){
+    const user = await getJSON(`${API}/user/${CONFIG.sleeper.username}`);
+    const state = await getJSON(`${API}/state/nfl`).catch(()=>({week:1}));
+    const week = state.week || 1;
+    const [pmap, leaguesRaw] = await Promise.all([ loadPlayers(),
+      getJSON(`${API}/user/${user.user_id}/leagues/nfl/${CONFIG.sleeper.season}`) ]);
+    const order = CONFIG.sleeper.leagueOrder;
+    const leagues = leaguesRaw.slice().sort((a,b)=>{
+      const ia=order.indexOf(a.league_id), ib=order.indexOf(b.league_id); return (ia<0?99:ia)-(ib<0?99:ib); });
+
+    const out=[];
+    for(const lg of leagues){
+      try{
+        const salaryCfg = CONFIG.sleeper.salaryLeagues[lg.league_id] || null;
+        const faabBudget = (lg.settings && lg.settings.waiver_budget!=null) ? lg.settings.waiver_budget : null;
+        const [rosters, users, matchups, salaryMap, transactions] = await Promise.all([
+          getJSON(`${API}/league/${lg.league_id}/rosters`),
+          getJSON(`${API}/league/${lg.league_id}/users`),
+          getJSON(`${API}/league/${lg.league_id}/matchups/${week}`).catch(()=>[]),
+          salaryCfg ? loadSalaries(lg.league_id) : Promise.resolve(null),
+          loadTransactions(lg.league_id, week),
+        ]);
+        const usersById={}; users.forEach(u=>usersById[u.user_id]=u);
+        const rosterById={}; rosters.forEach(r=>rosterById[r.roster_id]=r);
+        const mine = rosters.find(r=>r.owner_id===user.user_id) || rosters.find(r=>(r.co_owners||[]).includes(user.user_id));
+        const roster_positions = lg.roster_positions || [];
+
+        // ALL teams
+        const teams = rosters.map(r=>buildTeam(r, roster_positions, usersById, pmap, salaryMap, salaryCfg));
+        const myTeam = mine ? teams.find(t=>t.roster_id===mine.roster_id) : null;
+
+        // matchup (mine)
+        let matchup=null;
+        if(mine && matchups && matchups.length){
+          const myM=matchups.find(m=>m.roster_id===mine.roster_id);
+          if(myM){ const oppM=matchups.find(m=>m.matchup_id===myM.matchup_id && m.roster_id!==mine.roster_id);
+            const oppT = oppM ? teams.find(t=>t.roster_id===oppM.roster_id) : null;
+            matchup={ me:{teamName:myTeam.teamName, points:myM.points||0},
+                      opp: oppM?{teamName:oppT?oppT.teamName:"Opp", points:oppM.points||0}:null }; }
+        }
+
+        // standings
+        const standings = teams.slice().sort((a,b)=>(b.record.w-a.record.w)||(b.pf-a.pf))
+          .map((t,i)=>({ rank:i+1, teamName:t.teamName, owner:t.owner, w:t.record.w, l:t.record.l, t:t.record.t,
+                         pf:t.pf, isMe: myTeam && t.roster_id===myTeam.roster_id }));
+
+        const analyzer = analyze(teams, matchups, roster_positions, transactions, week,
+                                 mine?mine.roster_id:null, faabBudget);
+
+        out.push({
+          provider:"sleeper", leagueId:lg.league_id, name:lg.name, seasonWeek:week, roster_positions,
+          salary: salaryCfg ? { cap:salaryCfg.cap, floor:salaryCfg.floor, hasMap: !!salaryMap } : null,
+          me: myTeam ? { teamName:myTeam.teamName, record:myTeam.record, pf:myTeam.pf, pa:myTeam.pa,
+                         starters:myTeam.starters, bench:myTeam.bench, salary:myTeam.salary } : null,
+          matchup, standings, teams, analyzer,
+        });
+      }catch(e){ out.push({ provider:"sleeper", leagueId:lg.league_id, name:lg.name, error:e.message }); }
+    }
+    return { week, out };
+  }
+  return { load };
+})();
+
+providers.espn  = { load: async ()=>{ throw new Error("ESPN not enabled yet (Phase 2 — serverless)"); } };
+providers.yahoo = { load: async ()=>{ throw new Error("Yahoo not enabled yet (Phase 3 — serverless)"); } };
+
+/* ============================================================================
+   RENDER
+   ============================================================================ */
+function fmtPts(n){ return (Math.round((n||0)*100)/100).toFixed(2); }
+function recStr(r){ return `${r.w}-${r.l}${r.t?("-"+r.t):""}`; }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+function salChip(salary, pid){
+  if(!salary) return "";
+  const s = salary.byId[String(pid)];
+  if(!s) return "";
+  return s.known ? `<span class="psal">$${s.amt}</span>`
+                 : `<span class="psal verify" title="No auction price (waiver/FA pickup) — floored to $${s.amt}. Verify.">$${s.amt}·?</span>`;
+}
+
+function playerRow(slot, player, isBench, salary, reserve){
+  const cls="pl"+(isBench?" bench":"");
+  const slotLbl = reserve ? "IR/TX" : (isBench?"BN":slot);
+  if(!player) return `<div class="${cls}"><span class="slot ${esc(slotLbl)}">${esc(slotLbl)}</span>`
+    +`<span class="pname empty-slot">— empty —</span><span class="ppos"></span></div>`;
+  const meta=[player.pos,player.team].filter(Boolean).join(" · ");
+  const sal = salChip(salary, player.id);
+  return `<div class="${cls}">
+    <span class="slot ${esc(slotLbl)}">${esc(slotLbl)}</span>
+    <span class="pname">${esc(player.name)} <span class="pmeta">${esc(meta)}</span></span>
+    ${sal || `<span class="ppos pos-${esc(player.pos)}">${esc(player.pos||"")}</span>`}
+  </div>`;
+}
+
+function rosterBlock(team, salary){
+  const st = team.starters.map(s=>playerRow(s.slot,s.player,false,salary,false)).join("");
+  const bn = team.bench.map(b=>playerRow("BN",b.player,true,salary,b.reserve)).join("") || `<div class="note" style="text-align:left">No bench.</div>`;
+  let capLine="";
+  if(team.salary){
+    const pctv=Math.min(100,Math.round(team.salary.total/team.salary.cap*100));
+    const over=team.salary.total>team.salary.cap;
+    capLine=`<div class="lg-meta" style="margin-top:8px">Cap: <b style="color:${over?'var(--red)':'var(--gold)'}">$${team.salary.total}</b> / $${team.salary.cap}`
+      +(team.salary.unknownCount?` · ${team.salary.unknownCount} floored/verify`:"")+`</div>
+      <div class="capbar"><div class="fill ${over?'over':''}" style="width:${pctv}%"></div></div>`;
+  }
+  return `<div class="sh">Starters</div><div class="roster">${st}</div>
+    <details class="more"><summary>Bench (${team.bench.length})</summary><div class="roster" style="margin-top:6px">${bn}</div></details>
+    ${capLine}`;
+}
+
+function analyzerPane(A, L){
+  if(!A) return `<div class="note">No analyzer data.</div>`;
+  const s=[];
+  // lineup shapes
+  s.push(`<div class="sh">Roster construction (starting lineups)</div>`);
+  s.push(`<div class="an-grid">`);
+  s.push(`<div class="stat"><div class="k">Most common shape</div><div class="v">${esc(A.commonShape?A.commonShape[0]:"—")}</div><div class="d">${A.commonShape?A.commonShape[1]:0} of ${A.teamsCount} teams run this</div></div>`);
+  const myShape=A.shapes.find(x=>x.isMe);
+  s.push(`<div class="stat me"><div class="k">Your shape</div><div class="v">${esc(myShape?myShape.shapeKey:"—")}</div><div class="d">${myShape&&A.commonShape&&myShape.shapeKey!==A.commonShape[0]?"differs from the field":"matches the field"}</div></div>`);
+  s.push(`</div>`);
+  if(A.quirks.length) s.push(`<div class="an-note">🔍 `+A.quirks.map(esc).join(" · ")+`</div>`);
+  if(A.unusual.length) s.push(`<div class="an-note">⚠️ Unusual lineups: `+A.unusual.map(u=>esc(u.teamName)+" ("+esc(u.shapeKey)+")").join(", ")+`</div>`);
+
+  // scoring
+  if(A.scoring){
+    s.push(`<div class="sh">Scoring this week</div><div class="an-grid">`);
+    s.push(`<div class="stat"><div class="k">Top scorer</div><div class="v">${esc(A.scoring.top.teamName)}</div><div class="d">${fmtPts(A.scoring.top.points)} pts</div></div>`);
+    s.push(`<div class="stat"><div class="k">Most pts on bench</div><div class="v">${esc(A.scoring.mostOnBench.teamName)}</div><div class="d">${fmtPts(A.scoring.mostOnBench.benchPts)} left on bench</div></div>`);
+    if(A.scoring.me){ s.push(`<div class="stat me"><div class="k">You scored</div><div class="v">${fmtPts(A.scoring.me.points)}</div><div class="d">${fmtPts(A.scoring.me.benchPts)} on your bench</div></div>`); }
+    s.push(`</div>`);
+  }
+
+  // transactions / FAAB
+  if(A.tx){
+    s.push(`<div class="sh">Transactions & FAAB</div><div class="an-grid">`);
+    s.push(`<div class="stat"><div class="k">Total moves</div><div class="v">${A.tx.totalMoves}</div><div class="d">${A.tx.adds} adds · ${A.tx.trades} trades (season)</div></div>`);
+    if(A.tx.busiest) s.push(`<div class="stat"><div class="k">Most active</div><div class="v">${esc(A.tx.busiest.teamName)}</div><div class="d">${A.tx.busiest.moves} moves${A.tx.busiest.isMe?" (you)":""}</div></div>`);
+    s.push(`</div>`);
+    if(A.tx.faabBudget!=null){
+      s.push(`<details class="more"><summary>FAAB spent (of $${A.tx.faabBudget})</summary><div style="margin-top:6px">`);
+      A.tx.faab.forEach(f=>{ s.push(`<div class="an-row"><span class="lab">${esc(f.teamName)}${f.isMe?" (you)":""}</span><span class="val">$${f.spent}${f.left!=null?` · $${f.left} left`:""}</span></div>`); });
+      s.push(`</div></details>`);
+    }
+  }
+
+  // my team vs league
+  if(A.mine){
+    s.push(`<div class="sh">Your team vs the league</div><div class="an-grid">`);
+    s.push(`<div class="stat me"><div class="k">Points-for rank</div><div class="v">#${A.mine.pfRank} <span class="d" style="display:inline">of ${A.teamsCount}</span></div></div>`);
+    s.push(`<div class="stat"><div class="k">Roster size</div><div class="v">${A.mine.rosterSize}</div><div class="d">activity rank #${A.mine.movesRank}</div></div>`);
+    s.push(`</div>`);
+  }
+
+  // honest skips
+  if(A.skips.length){
+    s.push(`<div class="an-skip"><b>Not shown (API can't support / not yet):</b><br>`+A.skips.map(esc).join("<br>")+`</div>`);
+  }
+  return s.join("");
+}
+
+function allTeamsPane(L){
+  return L.teams.slice().sort((a,b)=>(b.record.w-a.record.w)||(b.pf-a.pf)).map((t,i)=>{
+    const isMe = L.me && t.teamName===L.me.teamName && (L.standings.find(s=>s.isMe)||{}).teamName===t.teamName;
+    const me = L.standings.find(s=>s.isMe);
+    const mine = me && me.teamName===t.teamName;
+    const capTxt = t.salary ? `<span class="st-pf" style="color:${t.salary.total>t.salary.cap?'var(--red)':'var(--gold)'}">$${t.salary.total}</span>` : `<span class="st-pf">${fmtPts(t.pf)}</span>`;
+    return `<details class="tm ${mine?'me':''}">
+      <summary>
+        <span class="st-rk">${i+1}</span>
+        <span class="st-team">${esc(t.teamName)} ${mine?'<span class="badge">YOU</span>':''}<span class="st-sub"> · @${esc(t.owner)}</span></span>
+        <span class="st-rec">${recStr(t.record)}</span>
+        ${capTxt}
+      </summary>
+      <div class="tmbody">${rosterBlock(t, t.salary)}</div>
+    </details>`;
+  }).join("");
+}
+
+function leagueCard(L, idx){
+  if(L.error) return `<div class="card"><div class="lg-head"><span class="lg-name">${esc(L.name||"League")}</span></div><div class="err">Couldn't load: ${esc(L.error)}</div></div>`;
+  if(!L.me)  return `<div class="card"><div class="lg-head"><span class="lg-name">${esc(L.name)}</span></div><div class="note">No roster found for you here.</div></div>`;
+
+  let muHtml="";
+  if(L.matchup){ const m=L.matchup, opp=m.opp;
+    const meLead=opp&&m.me.points>opp.points, oppLead=opp&&opp.points>m.me.points;
+    muHtml=`<div class="mu">
+      <div class="mu-side me ${meLead?'mu-lead':''}"><div class="mu-team">${esc(m.me.teamName)}</div><div class="mu-sub">you</div><div class="mu-pts">${fmtPts(m.me.points)}</div></div>
+      <div class="mu-vs">Wk ${L.seasonWeek}<br>vs</div>
+      <div class="mu-side right ${oppLead?'mu-lead':''}"><div class="mu-team">${opp?esc(opp.teamName):"— BYE —"}</div><div class="mu-sub">opponent</div><div class="mu-pts">${opp?fmtPts(opp.points):"—"}</div></div>
+    </div>`;
+  }
+  const salBadge = L.salary ? `<span class="badge" title="Auction salary cap league">💰 SALARY CAP $${L.salary.cap}</span>` : "";
+  const myTeamObj = L.teams.find(t=> (L.standings.find(s=>s.isMe)||{}).teamName===t.teamName ) || null;
+  const p = "L"+idx;
+
+  return `<div class="card">
+    <div class="lg-head">
+      <span class="lg-name">${esc(L.name)}${salBadge}</span>
+      <span class="lg-rec">${esc(L.me.teamName)} · ${recStr(L.me.record)}</span>
+    </div>
+    <div class="lg-meta">${L.standings.length} teams · your PF ${fmtPts(L.me.pf)} · PA ${fmtPts(L.me.pa)}</div>
+    ${muHtml}
+    <div class="vtabs" data-p="${p}">
+      <button class="on" data-t="my">My Team</button>
+      <button data-t="teams">All Teams</button>
+      <button data-t="an">Analyzer</button>
+      <button data-t="stand">Standings</button>
+    </div>
+    <div class="vpane on" data-pane="${p}-my">${rosterBlock(myTeamObj||{starters:L.me.starters,bench:L.me.bench,salary:L.me.salary}, L.me.salary)}</div>
+    <div class="vpane" data-pane="${p}-teams">${allTeamsPane(L)}</div>
+    <div class="vpane" data-pane="${p}-an">${analyzerPane(L.analyzer, L)}</div>
+    <div class="vpane" data-pane="${p}-stand"><div class="stand">${
+      L.standings.map(s=>`<div class="st-row ${s.isMe?'me':''}"><span class="st-rk">${s.rank}</span>
+        <span class="st-team">${esc(s.teamName)}<span class="st-sub"> · @${esc(s.owner)}</span></span>
+        <span class="st-rec">${recStr(s)}</span><span class="st-pf">${fmtPts(s.pf)}</span></div>`).join("")
+    }</div></div>
+  </div>`;
+}
+
+// view-tab switching (delegated)
+document.addEventListener("click", e=>{
+  const btn=e.target.closest(".vtabs button"); if(!btn) return;
+  const wrap=btn.closest(".vtabs"); const p=wrap.dataset.p; const t=btn.dataset.t;
+  wrap.querySelectorAll("button").forEach(b=>b.classList.toggle("on", b===btn));
+  const card=wrap.closest(".card");
+  card.querySelectorAll(".vpane").forEach(pane=>pane.classList.toggle("on", pane.dataset.pane===p+"-"+t));
+});
+
+async function boot(){
+  const box=document.getElementById("leagues"), eb=document.getElementById("errbox"), sub=document.getElementById("subhead");
+  try{
+    const { week, out } = await providers.sleeper.load();
+    sub.textContent = `${CONFIG.sleeper.username} · ${CONFIG.sleeper.season} · Week ${week} · ${out.length} Sleeper leagues`;
+    box.innerHTML = out.map((L,i)=>leagueCard(L,i)).join("");
+    document.getElementById("foot").textContent =
+      "Live from Sleeper's public API · player names + salaries cached in your browser · ESPN + Yahoo coming via a secure serverless backend.";
+  }catch(e){
+    eb.innerHTML=`<div class="err">Couldn't load Sleeper data: ${esc(e.message)}. Refresh to retry.</div>`;
+    box.innerHTML=""; sub.textContent="error";
+  }
+}
+boot();
+</script>
+</body>
+</html>
