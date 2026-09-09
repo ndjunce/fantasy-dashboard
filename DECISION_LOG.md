@@ -35,5 +35,7 @@ ESPN needs session cookies (`espn_s2` + `SWID`); Yahoo needs OAuth tokens. These
 
 **Phasing:** Phase 1 Sleeper (static GitHub Pages) ✅ · Phase 2 ESPN (6 leagues, serverless) 🔜 · Phase 3 Yahoo (2 leagues, serverless OAuth) 🔜.
 
-## 2026-08-13 — Deploy Phase 1 to its own public GitHub Pages site — OPEN
-Deploying as a standalone public repo (no secrets in the repo, safe). Live URL to be recorded here once Pages builds.
+## 2026-08-13 — Deployed Phase 1 to its own public GitHub Pages site — WORKS
+Standalone public repo `ndjunce/fantasy-dashboard` (only index.html + README + DECISION_LOG; no secrets — safe as public). Pages enabled main/root.
+- **Live URL: https://ndjunce.github.io/fantasy-dashboard/**
+- Verified live (headless, 390px mobile): HTTP 200; all 3 leagues render with real player names; all-teams 8/10/10; dynasty shows 💰 SALARY CAP $365 with 305 salary chips + cap bars; zero horizontal overflow.
