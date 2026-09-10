@@ -1,0 +1,18 @@
+# ===== SECRETS — NEVER COMMIT =====
+# ESPN account cookies (espn_s2 + SWID) live ONLY in local/serverless env, never in the repo.
+espn_auth.local.json
+*.local.json
+**/*.local.json
+.env
+.env.*
+
+# local test artifacts / temp probes
+_*.js
+_*.json
+*.tmp
+
+# node / vercel
+node_modules/
+.vercel/
+.DS_Store
+Thumbs.db

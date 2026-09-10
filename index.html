@@ -137,8 +137,8 @@
   <div class="sub" id="subhead">Loading…</div>
   <nav class="tabs">
     <span class="tab active">🟢 Sleeper</span>
-    <span class="tab soon" title="Coming in a later phase (serverless backend)">ESPN · soon</span>
-    <span class="tab soon" title="Coming in a later phase (serverless backend)">Yahoo · soon</span>
+    <span class="tab active">🔴 ESPN</span>
+    <span class="tab soon" title="Coming in a later phase (serverless OAuth)">Yahoo · soon</span>
   </nav>
 </header>
 
@@ -163,13 +163,36 @@ const CONFIG = {
     // leagues that use an auction salary cap -> show per-player $ + team cap totals
     salaryLeagues: { "1372256037666574336": { cap: 365, floor: 1 } },
   },
-  espn:  { enabled:false /* Phase 2: espn_s2+SWID -> serverless env vars, NOT here */ },
+  espn: {
+    enabled: true,
+    season: "2026",
+    // The dashboard NEVER holds the cookie. It calls this serverless proxy, which reads the
+    // cookie from Vercel env vars server-side and returns only data. On the Vercel deploy this
+    // is same-origin ("/api/espn"); the GitHub Pages copy falls back to the absolute vercel URL.
+    apiBase: (location.hostname.endsWith("vercel.app") || location.hostname==="localhost")
+      ? "/api/espn"
+      : "https://fantasy-dashboard-ndjunce.vercel.app/api/espn",   // <- set to your real vercel domain after deploy
+    leagues: [
+      { id:"963488",     team:5,  name:"Royal Crushers" },
+      { id:"484087929",  team:12, name:"Dargelong" },
+      { id:"764639655",  team:8,  name:"2QB / Winona" },
+      { id:"175994",     team:4,  name:"6-man" },
+      { id:"1910409336", team:5,  name:"CAN AM" },
+      { id:"771790710",  team:2,  name:"Uncle and Boys" },
+    ],
+  },
   yahoo: { enabled:false /* Phase 3: OAuth -> serverless */ },
 };
 
 async function getJSON(url){
   const r = await fetch(url, {cache:"no-store"});
   if(!r.ok) throw new Error(url.split("/v1/")[1] + " → HTTP " + r.status);
+  return r.json();
+}
+// generic fetch (used by the ESPN proxy, which returns 200 + {error:...} for auth issues)
+async function getJSONraw(url){
+  const r = await fetch(url, {cache:"no-store"});
+  if(!r.ok) throw new Error("HTTP "+r.status);
   return r.json();
 }
 
@@ -415,7 +438,130 @@ providers.sleeper = (function(){
   return { load };
 })();
 
-providers.espn  = { load: async ()=>{ throw new Error("ESPN not enabled yet (Phase 2 — serverless)"); } };
+/* ---------- ESPN (Phase 2 — via Vercel serverless proxy; cookie stays server-side) ---------- */
+providers.espn = (function(){
+  // ESPN lineupSlotId -> label (subset). Unknown -> its id.
+  const SLOT = {0:"QB",1:"TQB",2:"RB",3:"RB/WR",4:"WR",5:"WR/TE",6:"TE",7:"OP",8:"DT",9:"DE",
+    10:"LB",11:"DL",12:"CB",13:"S",14:"DB",15:"DP",16:"D/ST",17:"K",18:"P",19:"HC",
+    20:"BN",21:"IR",23:"FLEX",24:"ER"};
+  const POS = {1:"QB",2:"RB",3:"WR",4:"TE",5:"K",16:"DEF"};
+  // ESPN proTeamId -> NFL abbrev (for player team + cross-league schedule matching)
+  const PRO = {0:"FA",1:"ATL",2:"BUF",3:"CHI",4:"CIN",5:"CLE",6:"DAL",7:"DEN",8:"DET",9:"GB",10:"TEN",
+    11:"IND",12:"KC",13:"LV",14:"LAR",15:"MIA",16:"MIN",17:"NE",18:"NO",19:"NYG",20:"NYJ",21:"PHI",
+    22:"ARI",23:"PIT",24:"LAC",25:"SF",26:"SEA",27:"TB",28:"WSH",29:"CAR",30:"JAX",33:"BAL",34:"HOU"};
+
+  function teamName(t){ return (t.name || `${t.location||""} ${t.nickname||""}`.trim() || ("Team "+t.id)); }
+  const pf = t => (t.record && t.record.overall && t.record.overall.pointsFor) || 0;
+  const pa = t => (t.record && t.record.overall && t.record.overall.pointsAgainst) || 0;
+  const recOf = t => { const o=(t.record&&t.record.overall)||{}; return {w:o.wins||0,l:o.losses||0,t:o.ties||0}; };
+
+  function playerOf(entry){
+    const p = (entry.playerPoolEntry && entry.playerPoolEntry.player) || entry.player || {};
+    return { id:String(p.id||entry.playerId||""), name:p.fullName||("id "+(entry.playerId||"?")),
+             pos: POS[p.defaultPositionId]||"", team: PRO[p.proTeamId]||"" };
+  }
+  function buildTeam(t, myTeamId){
+    const entries = ((t.roster||{}).entries)||[];
+    const starterSlots = entries.filter(e=>SLOT[e.lineupSlotId]!=="BN"&&SLOT[e.lineupSlotId]!=="IR");
+    const benchEntries  = entries.filter(e=>SLOT[e.lineupSlotId]==="BN"||SLOT[e.lineupSlotId]==="IR");
+    const starters = starterSlots.map(e=>({ slot: SLOT[e.lineupSlotId]||String(e.lineupSlotId), player: playerOf(e) }));
+    const bench = benchEntries.map(e=>({ player: playerOf(e), reserve: SLOT[e.lineupSlotId]==="IR" }));
+    return {
+      roster_id: t.id, teamName: teamName(t), owner: teamName(t),
+      record: recOf(t), pf: pf(t), pa: pa(t), moves: (t.transactionCounter&&t.transactionCounter.acquisitions)||0,
+      faabUsed: (t.transactionCounter&&t.transactionCounter.acquisitionBudgetSpent)||0,
+      starters, bench, salary:null,
+      players: entries.map(e=>playerOf(e).id).filter(Boolean),
+      _allPlayers: entries.map(e=>({ ...playerOf(e), slot: SLOT[e.lineupSlotId]||"", starter: SLOT[e.lineupSlotId]!=="BN"&&SLOT[e.lineupSlotId]!=="IR" })),
+    };
+  }
+
+  // reuse the same analyzer contract Sleeper uses (lineup shapes + quirks + my-vs-league).
+  // ESPN scoring/tx feeds differ, so we compute shapes + ranks and list the rest as skips.
+  function analyze(teams, myId, week){
+    const skips=[];
+    const shapes = teams.map(t=>{ const c={}; t.starters.forEach(s=>{const p=s.player.pos; if(p)c[p]=(c[p]||0)+1;});
+      const shapeKey=["QB","RB","WR","TE","K","DEF","DL","LB","DB"].filter(p=>c[p]).map(p=>c[p]+p).join(" ");
+      return { roster_id:t.roster_id, teamName:t.teamName, counts:c, shapeKey, isMe:t.roster_id===myId }; });
+    const sc={}; shapes.forEach(s=>sc[s.shapeKey]=(sc[s.shapeKey]||0)+1);
+    const commonShape=Object.entries(sc).sort((a,b)=>b[1]-a[1])[0];
+    const unusual=shapes.filter(s=>sc[s.shapeKey]===1 && shapes.length>2);
+    const quirks=[];
+    ["QB","RB","WR","TE","K"].forEach(pos=>{ const wc=shapes.map(s=>({t:s.teamName,isMe:s.isMe,n:s.counts[pos]||0}));
+      const max=Math.max(...wc.map(x=>x.n)); const top=wc.filter(x=>x.n===max&&max>0);
+      if(top.length===1&&max>=2) quirks.push(`${top[0].t} is the only team starting ${max} ${pos}${top[0].isMe?" (you)":""}`); });
+    // scoring this week (ESPN team.roster only carries current-period; points populate once played)
+    let scoring=null;
+    const anyPts = teams.some(t=>pf(t)>0);
+    // my-vs-league
+    let mine=null; const me=teams.find(t=>t.roster_id===myId);
+    if(me){ const pfRank=teams.slice().sort((a,b)=>b.pf-a.pf).findIndex(t=>t.roster_id===myId)+1;
+      const myShape=shapes.find(s=>s.roster_id===myId);
+      mine={ pfRank, paRank: teams.slice().sort((a,b)=>b.pa-a.pa).findIndex(t=>t.roster_id===myId)+1,
+        rosterSize: me.players.length, shape: myShape?myShape.shapeKey:"",
+        movesRank: teams.slice().sort((a,b)=>b.moves-a.moves).findIndex(t=>t.roster_id===myId)+1 }; }
+    skips.push("Weekly scoring / boom-bust / points-left-on-bench: populate once games are played (ESPN returns 0 pre-kickoff).");
+    skips.push("FAAB spent + trade grading: ESPN exposes acquisition counts, not full FAAB ledgers; trade grading needs projections.");
+    return { shapes, commonShape, unusual, quirks, scoring, tx:null, mine, skips, teamsCount:teams.length };
+  }
+
+  async function loadLeague(cfg, season){
+    const url = `${CONFIG.espn.apiBase}?league=${encodeURIComponent(cfg.id)}&season=${encodeURIComponent(season)}`;
+    const data = await getJSONraw(url);
+    if(data && data.error){
+      if(data.error==="espn_auth_expired") return { authExpired:true, name:cfg.name, leagueId:cfg.id };
+      throw new Error(data.error + (data.message?(": "+data.message):""));
+    }
+    const settings = data.settings||{};
+    const teamsRaw = data.teams||[];
+    const teams = teamsRaw.map(t=>buildTeam(t, cfg.team));
+    const myTeam = teams.find(t=>t.roster_id===cfg.team) || null;
+    const week = data.scoringPeriodId || (data.status && data.status.currentMatchupPeriod) || 1;
+
+    // matchup (mine) from schedule
+    let matchup=null;
+    if(myTeam){
+      const cur = (data.status && data.status.currentMatchupPeriod) || week;
+      const g = (data.schedule||[]).find(x=> x.matchupPeriodId===cur &&
+        ((x.home&&x.home.teamId===cfg.team)||(x.away&&x.away.teamId===cfg.team)));
+      if(g){
+        const meHome = g.home && g.home.teamId===cfg.team;
+        const meSide = meHome?g.home:g.away, oppSide = meHome?g.away:g.home;
+        const oppTeam = oppSide ? teams.find(t=>t.roster_id===oppSide.teamId) : null;
+        matchup = { me:{teamName:myTeam.teamName, points:(meSide&&meSide.totalPoints)||0},
+                    opp: oppSide?{teamName:oppTeam?oppTeam.teamName:"Opp", points:oppSide.totalPoints||0}:null };
+      }
+    }
+    const standings = teams.slice().sort((a,b)=>(b.record.w-a.record.w)||(b.pf-a.pf))
+      .map((t,i)=>({ rank:i+1, teamName:t.teamName, owner:t.owner, w:t.record.w,l:t.record.l,t:t.record.t,
+                     pf:t.pf, isMe: myTeam && t.roster_id===myTeam.roster_id }));
+    const analyzer = analyze(teams, cfg.team, week);
+
+    return {
+      provider:"espn", leagueId:cfg.id, name:cfg.name, seasonWeek:week, roster_positions:[], salary:null,
+      me: myTeam ? { teamName:myTeam.teamName, record:myTeam.record, pf:myTeam.pf, pa:myTeam.pa,
+                     starters:myTeam.starters, bench:myTeam.bench, salary:null } : null,
+      matchup, standings, teams, analyzer,
+    };
+  }
+
+  async function load(){
+    if(!CONFIG.espn.enabled) return { week:1, out:[] };
+    const out=[]; let authExpired=false;
+    // sequential to be gentle on the single cookie / rate limits
+    for(const cfg of CONFIG.espn.leagues){
+      try{
+        const L = await loadLeague(cfg, CONFIG.espn.season);
+        if(L.authExpired){ authExpired=true; out.push({ provider:"espn", leagueId:cfg.id, name:cfg.name, authExpired:true }); }
+        else out.push(L);
+      }catch(e){ out.push({ provider:"espn", leagueId:cfg.id, name:cfg.name, error:e.message }); }
+    }
+    const week = out.find(L=>L.seasonWeek)?.seasonWeek || 1;
+    return { week, out, authExpired };
+  }
+  return { load };
+})();
+
 providers.yahoo = { load: async ()=>{ throw new Error("Yahoo not enabled yet (Phase 3 — serverless)"); } };
 
 /* ============================================================================
@@ -531,9 +677,15 @@ function allTeamsPane(L){
   }).join("");
 }
 
+function providerTag(L){
+  if(L.provider==="espn") return `<span class="badge" style="background:rgba(255,96,96,.14);color:#ff8a8a;border-color:#ff8a8a" title="ESPN league (via secure serverless proxy)">ESPN</span>`;
+  return `<span class="badge" style="background:rgba(51,224,138,.14);color:var(--grn);border-color:var(--grn)" title="Sleeper league">SLEEPER</span>`;
+}
 function leagueCard(L, idx){
-  if(L.error) return `<div class="card"><div class="lg-head"><span class="lg-name">${esc(L.name||"League")}</span></div><div class="err">Couldn't load: ${esc(L.error)}</div></div>`;
-  if(!L.me)  return `<div class="card"><div class="lg-head"><span class="lg-name">${esc(L.name)}</span></div><div class="note">No roster found for you here.</div></div>`;
+  if(L.authExpired) return `<div class="card"><div class="lg-head"><span class="lg-name">${esc(L.name||"ESPN League")} ${providerTag(L)}</span></div>
+    <div class="err">🔑 <b>ESPN session expired.</b> Your saved cookie no longer works. Re-grab <code>espn_s2</code> + <code>SWID</code> from fantasy.espn.com and update them in Vercel → Project → Settings → Environment Variables, then redeploy. (Everything else still loads.)</div></div>`;
+  if(L.error) return `<div class="card"><div class="lg-head"><span class="lg-name">${esc(L.name||"League")} ${providerTag(L)}</span></div><div class="err">Couldn't load: ${esc(L.error)}</div></div>`;
+  if(!L.me)  return `<div class="card"><div class="lg-head"><span class="lg-name">${esc(L.name)} ${providerTag(L)}</span></div><div class="note">No roster found for you here.</div></div>`;
 
   let muHtml="";
   if(L.matchup){ const m=L.matchup, opp=m.opp;
@@ -550,7 +702,7 @@ function leagueCard(L, idx){
 
   return `<div class="card">
     <div class="lg-head">
-      <span class="lg-name">${esc(L.name)}${salBadge}</span>
+      <span class="lg-name">${esc(L.name)} ${providerTag(L)}${salBadge}</span>
       <span class="lg-rec">${esc(L.me.teamName)} · ${recStr(L.me.record)}</span>
     </div>
     <div class="lg-meta">${L.standings.length} teams · your PF ${fmtPts(L.me.pf)} · PA ${fmtPts(L.me.pa)}</div>
@@ -581,19 +733,203 @@ document.addEventListener("click", e=>{
   card.querySelectorAll(".vpane").forEach(pane=>pane.classList.toggle("on", pane.dataset.pane===p+"-"+t));
 });
 
+/* ============================================================================
+   CROSS-LEAGUE VIEWS (Sleeper + ESPN)
+   ============================================================================ */
+// NFL weekly schedule (opponent + kickoff) from ESPN's PUBLIC scoreboard (no auth).
+// Keyed by team abbrev -> { opp, kickoff(iso), dayTime }. TBD when unavailable (never faked).
+async function loadNflSchedule(season){
+  try{
+    const d = await getJSONraw(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${season}`);
+    const map={};
+    (d.events||[]).forEach(ev=>{
+      const c=(ev.competitions&&ev.competitions[0])||{}; const comp=c.competitors||[];
+      const home=comp.find(x=>x.homeAway==="home"), away=comp.find(x=>x.homeAway==="away");
+      if(!home||!away) return;
+      const ha=home.team.abbreviation, aa=away.team.abbreviation, iso=ev.date;
+      map[ha]={ opp:"vs "+aa, kickoff:iso };
+      map[aa]={ opp:"@ "+ha, kickoff:iso };
+    });
+    return map;
+  }catch(e){ return {}; }
+}
+function fmtKick(iso){
+  if(!iso) return "TBD";
+  const d=new Date(iso); if(isNaN(d)) return "TBD";
+  try{ return new Intl.DateTimeFormat("en-US",{weekday:"short",hour:"numeric",minute:"2-digit"}).format(d); }
+  catch(e){ return "TBD"; }
+}
+function dayKey(iso){ if(!iso) return "TBD"; const d=new Date(iso); if(isNaN(d)) return "TBD";
+  try{ return new Intl.DateTimeFormat("en-US",{weekday:"long",month:"short",day:"numeric"}).format(d); }catch(e){ return "TBD"; } }
+
+// D1 — every rostered player across ALL leagues, deduped, w/ which leagues + this week's game.
+function buildAllMyPlayers(allLeagues, sched){
+  const byPlayer={}; // key: name|pos|team -> {name,pos,team, leagues:Set, kickoff}
+  allLeagues.forEach(L=>{
+    if(!L.me) return;
+    const mine = [...(L.me.starters||[]).map(s=>({...s.player, starter:true})),
+                  ...(L.me.bench||[]).map(b=>({...b.player, starter:false}))].filter(p=>p&&p.name);
+    mine.forEach(p=>{
+      const key = (p.name||"").toLowerCase()+"|"+(p.pos||"");
+      const rec = byPlayer[key] || (byPlayer[key]={ name:p.name, pos:p.pos, team:p.team, leagues:new Set(), starterIn:0, total:0 });
+      rec.leagues.add(L.name); rec.total++; if(p.starter) rec.starterIn++;
+      if(!rec.team && p.team) rec.team=p.team;
+    });
+  });
+  const list = Object.values(byPlayer).map(r=>{
+    const g = r.team ? sched[r.team] : null;
+    return { ...r, leagues:[...r.leagues], oppText:(g?g.opp:"TBD"), kickoff:(g?g.kickoff:null) };
+  });
+  // group by day/time slot
+  const groups={};
+  list.forEach(p=>{ const k = p.kickoff?dayKey(p.kickoff):"TBD / bye"; (groups[k]=groups[k]||[]).push(p); });
+  // order groups by kickoff time; TBD last
+  const order = Object.keys(groups).sort((a,b)=>{
+    const ta = groups[a][0].kickoff?new Date(groups[a][0].kickoff).getTime():Infinity;
+    const tb = groups[b][0].kickoff?new Date(groups[b][0].kickoff).getTime():Infinity;
+    return ta-tb;
+  });
+  order.forEach(k=> groups[k].sort((a,b)=> (a.kickoff&&b.kickoff)?(new Date(a.kickoff)-new Date(b.kickoff)):0 || a.name.localeCompare(b.name)));
+  return { groups, order, count:list.length };
+}
+function renderAllMyPlayers(data){
+  if(!data.count) return `<div class="note">No rostered players found.</div>`;
+  const s=[`<div class="lg-meta" style="margin-bottom:10px">${data.count} unique players across all your leagues · grouped by kickoff</div>`];
+  data.order.forEach(k=>{
+    s.push(`<div class="sh">${esc(k)}</div><div class="roster">`);
+    data.groups[k].forEach(p=>{
+      const leagues = p.leagues.length>1 ? `${p.leagues.length} leagues` : p.leagues[0];
+      s.push(`<div class="pl">
+        <span class="slot pos-${esc(p.pos)}" style="background:#0d131c">${esc(p.pos||"?")}</span>
+        <span class="pname">${esc(p.name)} <span class="pmeta">${esc(p.team||"FA")} · ${esc(p.oppText)} · ${esc(fmtKick(p.kickoff))}</span></span>
+        <span class="ppos" title="${esc(p.leagues.join(", "))}">${esc(leagues)}${p.starterIn?` · ▶${p.starterIn}`:""}</span>
+      </div>`);
+    });
+    s.push(`</div>`);
+  });
+  return s.join("");
+}
+
+// D2 — available players per league. Honest signals only (trending-adds + position need); no fake score.
+// Sleeper: leaguewide trending-adds (who's hot) + which are NOT rostered in THIS league.
+let SLEEPER_TREND=null, SLEEPER_PMAP=null;
+async function loadSleeperTrending(){
+  if(SLEEPER_TREND) return SLEEPER_TREND;
+  try{
+    const t = await getJSON("https://api.sleeper.app/v1/players/nfl/trending/add?lookback_hours=24&limit=100");
+    SLEEPER_TREND = t||[]; return SLEEPER_TREND;
+  }catch(e){ SLEEPER_TREND=[]; return []; }
+}
+function myPositionNeed(L){
+  // count my starters by pos; flag positions where I'm thin relative to the league's typical starters
+  if(!L.me) return {};
+  const c={}; (L.me.starters||[]).forEach(s=>{const p=s.player&&s.player.pos; if(p)c[p]=(c[p]||0)+1;});
+  const bench={}; (L.me.bench||[]).forEach(b=>{const p=b.player&&b.player.pos; if(p)bench[p]=(bench[p]||0)+1;});
+  // "thin" = position with <=1 bench backup at RB/WR/TE/QB
+  const need={};
+  ["QB","RB","WR","TE"].forEach(p=>{ if((bench[p]||0)<=1) need[p]=true; });
+  return need;
+}
+
+function crossTabsShell(){
+  return `<div class="tabs" id="topTabs" style="margin:0 0 14px">
+    <span class="tab active" data-tt="leagues">🏟️ Leagues</span>
+    <span class="tab" data-tt="players">📋 All My Players</span>
+    <span class="tab" data-tt="avail">🔎 Available / Pickups</span>
+  </div>
+  <div id="tt-leagues" class="ttpane"></div>
+  <div id="tt-players" class="ttpane" style="display:none"></div>
+  <div id="tt-avail" class="ttpane" style="display:none"></div>`;
+}
+
 async function boot(){
   const box=document.getElementById("leagues"), eb=document.getElementById("errbox"), sub=document.getElementById("subhead");
-  try{
-    const { week, out } = await providers.sleeper.load();
-    sub.textContent = `${CONFIG.sleeper.username} · ${CONFIG.sleeper.season} · Week ${week} · ${out.length} Sleeper leagues`;
-    box.innerHTML = out.map((L,i)=>leagueCard(L,i)).join("");
-    document.getElementById("foot").textContent =
-      "Live from Sleeper's public API · player names + salaries cached in your browser · ESPN + Yahoo coming via a secure serverless backend.";
-  }catch(e){
-    eb.innerHTML=`<div class="err">Couldn't load Sleeper data: ${esc(e.message)}. Refresh to retry.</div>`;
-    box.innerHTML=""; sub.textContent="error";
-  }
+  box.innerHTML = `<div class="loading">Loading your leagues…</div>`;
+  const errors=[];
+
+  // load Sleeper + ESPN + the NFL schedule in parallel
+  const [sleeperRes, espnRes, sched] = await Promise.all([
+    providers.sleeper.load().catch(e=>{ errors.push("Sleeper: "+e.message); return {week:1,out:[]}; }),
+    CONFIG.espn.enabled ? providers.espn.load().catch(e=>{ errors.push("ESPN: "+e.message); return {week:1,out:[]}; }) : Promise.resolve({week:1,out:[]}),
+    loadNflSchedule(CONFIG.sleeper.season),
+  ]);
+
+  const week = sleeperRes.week || espnRes.week || 1;
+  const allLeagues = [...sleeperRes.out, ...espnRes.out];
+  const okLeagues = allLeagues.filter(L=>L.me && !L.error && !L.authExpired);
+
+  const nSleeper = sleeperRes.out.length, nEspn = espnRes.out.length;
+  sub.textContent = `JunceBoxes · ${CONFIG.sleeper.season} · Week ${week} · ${nSleeper} Sleeper + ${nEspn} ESPN leagues`;
+
+  if(errors.length) eb.innerHTML = `<div class="err">${errors.map(esc).join("<br>")}</div>`; else eb.innerHTML="";
+  if(espnRes.authExpired) eb.innerHTML += `<div class="err">🔑 ESPN session expired — refresh the cookie in Vercel env vars (see the ESPN cards below).</div>`;
+
+  // shell w/ top tabs
+  box.innerHTML = crossTabsShell();
+  document.getElementById("tt-leagues").innerHTML = allLeagues.map((L,i)=>leagueCard(L,i)).join("") || `<div class="note">No leagues loaded.</div>`;
+
+  // D1 — all my players (built from whatever loaded)
+  const amp = buildAllMyPlayers(okLeagues, sched);
+  document.getElementById("tt-players").innerHTML =
+    `<div class="card">${renderAllMyPlayers(amp)}
+     <div class="an-skip" style="margin-top:12px"><b>Note:</b> opponent + kickoff come from the NFL schedule; players on a bye or with an unscheduled game show <b>TBD</b> (never guessed).</div></div>`;
+
+  // D2 — available / pickups (Sleeper leagues use trending-adds + rostered-set; ESPN gets a note)
+  const trending = await loadSleeperTrending();
+  document.getElementById("tt-avail").innerHTML = renderAvailable(sleeperRes.out, espnRes.out, trending);
+
+  document.getElementById("foot").textContent =
+    "Sleeper via public API · ESPN via a secure serverless proxy (cookie stays server-side) · schedule from ESPN public scoreboard.";
 }
+
+function renderAvailable(sleeperLeagues, espnLeagues, trending){
+  const s=[];
+  s.push(`<div class="card"><div class="an-skip"><b>What this is:</b> a "who's available + trending + where you're thin" list — <b>not a projection</b>. Ranking = leaguewide trending adds (Sleeper) + your position needs. Scoring-based ranking fills in once games are played.</div></div>`);
+  // build a trending lookup (player_id -> add count) + resolve names from the Sleeper cache
+  const trendCount={}; (trending||[]).forEach(t=>trendCount[String(t.player_id)]=t.count);
+  let pmap=null; try{ pmap=JSON.parse(localStorage.getItem("sleeper_players_nfl_v1")||"null"); }catch(e){}
+
+  sleeperLeagues.forEach(L=>{
+    if(!L.me || !L.teams) return;
+    const rostered=new Set(); L.teams.forEach(t=>(t.players||[]).forEach(pid=>rostered.add(String(pid))));
+    const need = myPositionNeed(L);
+    // available trending = trending players not rostered in THIS league
+    const avail = (trending||[]).filter(t=>!rostered.has(String(t.player_id)))
+      .map(t=>{ const p=pmap?pmap[String(t.player_id)]:null;
+        return { name:p?p.n:("#"+t.player_id), pos:p?p.p:"", team:p?p.t:"", adds:t.count, needFlag: p&&need[p.p] }; })
+      .filter(x=>x.pos)
+      .sort((a,b)=> (b.needFlag-a.needFlag) || (b.adds-a.adds))
+      .slice(0,15);
+    const needStr = Object.keys(need).length? `You're thin at: <b>${Object.keys(need).join(", ")}</b>` : "Roster looks balanced";
+    s.push(`<div class="card"><div class="lg-head"><span class="lg-name">${esc(L.name)} ${providerTag(L)}</span></div>
+      <div class="lg-meta">${needStr} · top available by trending adds (24h)</div>
+      <div class="roster" style="margin-top:8px">`
+      + (avail.length? avail.map(a=>`<div class="pl">
+          <span class="slot pos-${esc(a.pos)}" style="background:#0d131c">${esc(a.pos)}</span>
+          <span class="pname">${esc(a.name)} <span class="pmeta">${esc(a.team||"FA")}${a.needFlag?" · fills a need":""}</span></span>
+          <span class="ppos" title="added in ${a.adds} leagues in last 24h">+${a.adds} 🔥</span>
+        </div>`).join("")
+        : `<div class="note" style="text-align:left">No trending free agents right now.</div>`)
+      + `</div></div>`);
+  });
+
+  // ESPN leagues — honest note (free-agent view is a heavier authed call; wired next iteration)
+  if(espnLeagues.some(L=>L.me)){
+    s.push(`<div class="card"><div class="lg-head"><span class="lg-name">ESPN leagues ${'' }</span></div>
+      <div class="an-skip"><b>ESPN pickups:</b> ESPN's free-agent pool needs a separate authed players query through the proxy. The trending-adds signal above is leaguewide (works for players available in your ESPN leagues too — cross-reference by name). A per-ESPN-league available list is the next iteration.</div></div>`);
+  }
+  return s.join("");
+}
+
+// top-level tab switching
+document.addEventListener("click", e=>{
+  const tt=e.target.closest("#topTabs .tab"); if(!tt) return;
+  const which=tt.dataset.tt;
+  document.querySelectorAll("#topTabs .tab").forEach(x=>x.classList.toggle("active", x===tt));
+  ["leagues","players","avail"].forEach(k=>{ const el=document.getElementById("tt-"+k); if(el) el.style.display = (k===which)?"":"none"; });
+  window.scrollTo({top:0,behavior:"smooth"});
+});
+
 boot();
 </script>
 </body>

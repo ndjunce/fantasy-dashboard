@@ -39,3 +39,28 @@ ESPN needs session cookies (`espn_s2` + `SWID`); Yahoo needs OAuth tokens. These
 Standalone public repo `ndjunce/fantasy-dashboard` (only index.html + README + DECISION_LOG; no secrets — safe as public). Pages enabled main/root.
 - **Live URL: https://ndjunce.github.io/fantasy-dashboard/**
 - Verified live (headless, 390px mobile): HTTP 200; all 3 leagues render with real player names; all-teams 8/10/10; dynasty shows 💰 SALARY CAP $365 with 305 salary chips + cap bars; zero horizontal overflow.
+
+## 2026-08-13 — Phase 2 (ESPN, 6 leagues) built via Vercel serverless — WORKS (deploy pending user)
+Added all 6 ESPN leagues + two cross-league views. Cookie (espn_s2 + SWID) stays server-side per the Phase-2 security decision; the browser only ever gets DATA.
+
+**Serverless proxy — `api/espn.js` (Vercel function):**
+- Reads `ESPN_S2` + `ESPN_SWID` from Vercel env vars (never in code/git). SWID auto-braced.
+- **League whitelist** (server-side): only my 6 league IDs (963488, 484087929, 764639655, 175994, 1910409336, 771790710) — the proxy can't be abused to fetch arbitrary leagues with my cookie.
+- **View whitelist**: mTeam/mRoster/mMatchup/mSettings/mStandings/mSchedule/kona_player_info only.
+- **CORS** locked to https://ndjunce.github.io (same-origin on the vercel.app deploy needs none).
+- **~60s in-memory cache** per warm lambda; read-only GETs only.
+- **401/403 → returns `{error:"espn_auth_expired"}`** (HTTP 200) so the UI shows a clean "refresh cookie" state instead of failing silently. Missing env → `server_not_configured`.
+- `vercel.json` (cleanUrls + s-maxage=60 on /api) and `.vercelignore` (never ships the local cookie file or `_*` test artifacts).
+
+**Dashboard `providers.espn`:** calls the proxy per league (`/api/espn?league=..&season=2026`), normalizes ESPN's shape into the SAME league object Sleeper uses (teams/me/matchup/standings/analyzer) so the existing card renderer + view tabs (My Team / All Teams / Analyzer / Standings) work unchanged. Handles ESPN SLOT/POS/proTeamId maps; generic across standard + 2QB/superflex + IDP shapes. `apiBase` = `/api/espn` on vercel.app/localhost, else absolute vercel URL (placeholder to update post-deploy). `authExpired` surfaces a per-card refresh-cookie message.
+
+**Cross-league views (Sleeper + ESPN):**
+- **D1 "All My Players"** — every rostered player across all 9 leagues, deduped by name+pos, showing which/how-many leagues + starter count, with this week's opponent + kickoff from ESPN's PUBLIC scoreboard (no auth). Grouped by kickoff day; players with no scheduled game show **TBD** (never faked).
+- **D2 "Available / Pickups"** — per Sleeper league: players NOT rostered in that league, ranked by **Sleeper leaguewide trending-adds (24h)** + flagged where I'm thin (position need). Explicitly labeled **not a projection**; scoring-based ranking noted as "fills in once games are played." ESPN per-league free-agent list deferred (needs a heavier authed players query) — honest note shown, trending-adds still cross-references by name.
+
+**VERIFIED end-to-end locally** (dev server injecting the real cookie into the function; headless Chrome @390px): all **9 league cards render (3 Sleeper + 6 ESPN), zero errors, zero horizontal overflow**; whitelist rejects a non-approved league id; ESPN roster names correct (Saquon/Hampton/Irving etc.); D1 = 113 unique players; D2 = trending lists for the 3 Sleeper leagues + ESPN note. Cookie never left the server. Secret scan: token in NO committable file; espn_auth.local.json gitignored.
+
+**Honest limitations recorded:** ESPN weekly points are 0 pre-kickoff (Week 1); D1 kickoffs show TBD until the scoreboard has the week's games; ESPN FAAB/trade grading not fully exposed by the API; ESPN per-league available-players list is the next iteration.
+
+## 2026-08-13 — DEPLOY Phase 2 to Vercel — OPEN (user action)
+Repo `ndjunce/fantasy-dashboard` gets `api/espn.js` + `vercel.json`. User imports repo to Vercel + sets ESPN_S2/ESPN_SWID env vars (values pasted in Vercel UI by the user, never in chat/git). Live vercel.app URL becomes the ESPN-enabled dashboard (phone + laptop). Update `CONFIG.espn.apiBase` absolute fallback to the real vercel domain if the GitHub Pages copy should also reach ESPN.

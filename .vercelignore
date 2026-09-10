@@ -1,0 +1,7 @@
+# never deploy secrets or local test artifacts to Vercel
+espn_auth.local.json
+*.local.json
+_*.js
+_*.json
+.env
+.env.*

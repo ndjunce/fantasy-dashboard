@@ -1,0 +1,6 @@
+{
+  "_comment": "COPY this file to 'espn_auth.local.json' (same folder) and paste your ONE ESPN cookie pair. That file is gitignored and must NEVER be committed. Do NOT put real values in THIS .example file. All 6 leagues use the SAME espn_s2 + SWID (one account session); only leagueId differs.",
+  "espn_s2": "PASTE_YOUR_espn_s2_VALUE_HERE",
+  "SWID": "{PASTE-YOUR-SWID-INCLUDING-THE-CURLY-BRACES}",
+  "season": 2026
+}
