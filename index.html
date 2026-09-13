@@ -85,6 +85,7 @@
   .amp-clear{background:transparent;color:var(--mut);border:1px solid var(--line);border-radius:8px;
              padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer}
   .amp-clear:hover{color:var(--txt);border-color:var(--mut)}
+  .amp-grouplbl{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
   .roster{display:flex;flex-direction:column;gap:3px}
   .pl{display:grid;grid-template-columns:46px 28px 1fr auto;gap:10px;align-items:center;
       padding:7px 10px;background:var(--bg);border:1px solid var(--line);border-radius:9px}
@@ -928,11 +929,22 @@ function buildAllMyPlayers(allLeagues, sched){
     // leagues this player is on, in the user's priority order
     const lgs = [...r.leagues].sort((a,b)=> leagueRank(a)-leagueRank(b) || String(a).localeCompare(String(b)));
     return { ...r, leagues:lgs, startSet:r.startSet, oppText:(g?g.opp:"TBD"), kickoff:(g?g.kickoff:null),
+             oppAbbr:(g?g.oppAbbr:null),
              gstate:(g?g.state:null), statusDetail:(g?g.statusDetail:null), completed:(g?!!g.completed:false),
              teamScore:(g&&g.teamScore!=null?g.teamScore:null), oppScore:(g&&g.oppScore!=null?g.oppScore:null) };
   });
-  // tag each player with its game window + matchup key (used for grouping)
-  list.forEach(p=>{ p.window = classifyWindow(p.kickoff); });
+  // tag each player with its game window + matchup key/label (used for grouping)
+  list.forEach(p=>{
+    p.window = classifyWindow(p.kickoff);
+    if(p.team && p.oppAbbr){
+      const pair=[p.team.toUpperCase(), p.oppAbbr.toUpperCase()].sort();
+      p.matchupKey = pair.join("__");            // stable regardless of home/away
+      p.matchupLabel = pair.join(" vs ");        // e.g. "SEA vs SF"
+    } else {
+      p.matchupKey = "TBD";
+      p.matchupLabel = "Other / TBD / Bye";
+    }
+  });
   // keep the flat list so future filter modes can regroup without a refetch
   return { list, count:list.length };
 }
@@ -945,6 +957,44 @@ function groupByWindow(list){
   order.forEach(w=> groups[w].sort((a,b)=>
     ((a.kickoff&&b.kickoff)?(new Date(a.kickoff)-new Date(b.kickoff)):0) || a.name.localeCompare(b.name)));
   return { groups, order };
+}
+
+// 2b — group by position (fixed position order; empty buckets skipped)
+const POSITION_ORDER = ["QB","RB","WR","TE","K","DEF","DL","LB","DB"];
+function groupByPosition(list){
+  const groups={};
+  list.forEach(p=>{ const k=p.pos||"Other"; (groups[k]=groups[k]||[]).push(p); });
+  const known = POSITION_ORDER.filter(k=>groups[k]);
+  const extra = Object.keys(groups).filter(k=>!POSITION_ORDER.includes(k)).sort();
+  const order = known.concat(extra);
+  order.forEach(k=> groups[k].sort((a,b)=> a.name.localeCompare(b.name)));
+  return { groups, order };
+}
+
+// 2c — group by NFL game/matchup (all my players in the same real-life game under one header).
+// Header label = "SEA vs SF"; groups ordered by kickoff time, TBD last; within a game, starters first then by name.
+function groupByMatchup(list){
+  const groups={}, meta={};
+  list.forEach(p=>{
+    const k=p.matchupKey||"TBD";
+    (groups[k]=groups[k]||[]).push(p);
+    if(!meta[k]) meta[k]={ label:p.matchupLabel||"Other / TBD / Bye", kickoff:p.kickoff||null };
+  });
+  const order = Object.keys(groups).sort((a,b)=>{
+    if(a==="TBD") return 1; if(b==="TBD") return -1;
+    const ta=meta[a].kickoff?new Date(meta[a].kickoff).getTime():Infinity;
+    const tb=meta[b].kickoff?new Date(meta[b].kickoff).getTime():Infinity;
+    return ta-tb || meta[a].label.localeCompare(meta[b].label);
+  });
+  order.forEach(k=> groups[k].sort((a,b)=> (b.starterIn>0)-(a.starterIn>0) || a.name.localeCompare(b.name)));
+  return { groups, order, meta };
+}
+
+// dispatcher: pick grouping by mode; returns {groups, order, meta?}
+function groupPlayers(list, mode){
+  if(mode==="position") return groupByPosition(list);
+  if(mode==="matchup")  return groupByMatchup(list);
+  return groupByWindow(list); // default
 }
 
 // game status chip: Final (w/ score) · LIVE (w/ score) · kickoff time · TBD. Never fabricated.
@@ -983,6 +1033,7 @@ let AMP_UPCOMING_ONLY = false;
 let AMP_STARTERS_ONLY = false;
 let AMP_POS = "ALL";      // ALL | QB | RB | ...
 let AMP_LEAGUE = "ALL";   // ALL | exact league name
+let AMP_GROUP = "window"; // window | matchup | position
 let AMP_DATA = null;
 let AMP_WEEK = null;
 
@@ -1011,21 +1062,26 @@ function renderAllMyPlayers(data, week){
   if(AMP_STARTERS_ONLY)      list = list.filter(p=>p.starterIn>0);
   if(AMP_UPCOMING_ONLY)      list = list.filter(isUpcoming);
 
-  const { groups, order } = groupByWindow(list);
+  const { groups, order, meta } = groupPlayers(list, AMP_GROUP);
   const wkLbl = week ? `Week ${esc(String(week))}` : "This week";
   const shown = list.length;
   const anyFilter = AMP_POS!=="ALL"||AMP_LEAGUE!=="ALL"||AMP_STARTERS_ONLY||AMP_UPCOMING_ONLY;
+  const groupLbl = AMP_GROUP==="matchup" ? "by game" : (AMP_GROUP==="position" ? "by position" : "by game window");
 
-  // build the position + league dropdown option lists
+  // build the group-by + position + league dropdown option lists
+  const grpOpts = [["window","Game window"],["matchup","By game"],["position","Position"]]
+    .map(([v,l])=>`<option value="${v}"${AMP_GROUP===v?" selected":""}>${esc(l)}</option>`).join("");
   const posOpts = [`<option value="ALL"${AMP_POS==="ALL"?" selected":""}>All positions</option>`]
     .concat(ampPositions(data.list).map(p=>`<option value="${esc(p)}"${AMP_POS===p?" selected":""}>${esc(p)}</option>`)).join("");
   const lgOpts = [`<option value="ALL"${AMP_LEAGUE==="ALL"?" selected":""}>All leagues</option>`]
     .concat(ampLeagues(data.list).map(n=>`<option value="${esc(n)}"${AMP_LEAGUE===n?" selected":""}>${esc(n)}</option>`)).join("");
 
   const s=[`<div class="amp-head">
-      <div class="amp-wk">${wkLbl} <span class="amp-sub">· by game window · ${shown}${anyFilter?` of ${data.count}`:""} players</span></div>
+      <div class="amp-wk">${wkLbl} <span class="amp-sub">· ${groupLbl} · ${shown}${anyFilter?` of ${data.count}`:""} players</span></div>
     </div>
     <div class="amp-filters">
+      <span class="amp-grouplbl">Group by</span>
+      <select id="ampGroup" class="amp-sel" title="Group players by">${grpOpts}</select>
       <select id="ampPos" class="amp-sel" title="Filter by position">${posOpts}</select>
       <select id="ampLeague" class="amp-sel" title="Filter by league">${lgOpts}</select>
       <label class="amp-toggle"><input type="checkbox" id="ampStarters" ${AMP_STARTERS_ONLY?"checked":""}> Starters only</label>
@@ -1033,9 +1089,17 @@ function renderAllMyPlayers(data, week){
       ${anyFilter?`<button id="ampClear" class="amp-clear" title="Clear all filters">✕ Clear</button>`:""}
     </div>`];
   if(!order.length){ s.push(`<div class="note">No players match these filters${anyFilter?` — <a href="#" id="ampClear2">clear filters</a>`:""}.</div>`); return s.join(""); }
-  order.forEach(w=>{
-    s.push(`<div class="sh">${esc(w)} <span class="grp-n">${groups[w].length}</span></div><div class="roster">`);
-    groups[w].forEach(p=> s.push(ampPlayerRow(p)));
+  order.forEach(k=>{
+    // matchup mode shows the game label + kickoff on the header; others use the key as the label
+    let header;
+    if(AMP_GROUP==="matchup" && meta && meta[k]){
+      const kick = meta[k].kickoff ? ` · ${esc(fmtKick(meta[k].kickoff))}` : "";
+      header = `${esc(meta[k].label)}${kick}`;
+    } else {
+      header = esc(k);
+    }
+    s.push(`<div class="sh">${header} <span class="grp-n">${groups[k].length}</span></div><div class="roster">`);
+    groups[k].forEach(p=> s.push(ampPlayerRow(p)));
     s.push(`</div>`);
   });
   return s.join("");
@@ -1170,6 +1234,7 @@ document.addEventListener("change", e=>{
   else if(t.id==="ampStarters") AMP_STARTERS_ONLY = t.checked;
   else if(t.id==="ampPos")      AMP_POS = t.value;
   else if(t.id==="ampLeague")   AMP_LEAGUE = t.value;
+  else if(t.id==="ampGroup")    AMP_GROUP = t.value;
   else hit=false;
   if(hit && window.__paintAMP) window.__paintAMP();
 });
