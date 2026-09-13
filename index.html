@@ -64,6 +64,19 @@
   .pl-lg{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}
   .pl-start{font-size:10px;font-weight:800;color:var(--grn);background:rgba(51,224,138,.12);border:1px solid var(--grn);border-radius:6px;padding:1px 6px;white-space:nowrap}
   .pl-bench{font-size:10px;font-weight:800;color:var(--mut);background:#0d131c;border:1px solid var(--line);border-radius:6px;padding:1px 6px;white-space:nowrap}
+  /* game status chip in the AMP meta line */
+  .gst{font-weight:800;white-space:nowrap}
+  .gst.pre{color:var(--mut)}
+  .gst.live{color:#ff6060}
+  .gst.final{color:var(--grn)}
+  .gst.tbd{color:var(--mut);opacity:.8}
+  .pl-d.is-played>summary{opacity:.62}
+  /* AMP header: week label + upcoming-only toggle */
+  .amp-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+  .amp-wk{font-size:15px;font-weight:800;color:var(--txt)}
+  .amp-sub{font-size:12px;font-weight:600;color:var(--mut)}
+  .amp-toggle{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--mut);cursor:pointer;user-select:none}
+  .amp-toggle input{accent-color:var(--grn);cursor:pointer}
   .roster{display:flex;flex-direction:column;gap:3px}
   .pl{display:grid;grid-template-columns:46px 28px 1fr auto;gap:10px;align-items:center;
       padding:7px 10px;background:var(--bg);border:1px solid var(--line);border-radius:9px}
@@ -788,17 +801,42 @@ document.addEventListener("click", e=>{
    ============================================================================ */
 // NFL weekly schedule (opponent + kickoff) from ESPN's PUBLIC scoreboard (no auth).
 // Keyed by team abbrev -> { opp, kickoff(iso), dayTime }. TBD when unavailable (never faked).
-async function loadNflSchedule(season){
+// Live NFL week from Sleeper's state endpoint (auto-advances through the season). No auth.
+async function loadNflState(){
+  try{ const s = await getJSONraw("https://api.sleeper.app/v1/state/nfl");
+    return { week: s.week||1, season: s.season||String(new Date().getFullYear()), seasonType: s.season_type||"regular" };
+  }catch(e){ return { week:1, season:String(new Date().getFullYear()), seasonType:"regular" }; }
+}
+
+// Parse one scoreboard competitor's game status into a normalized shape.
+// state ∈ {pre, in, post}; we also keep the display detail + score for rendering.
+function parseGameStatus(ev){
+  const t = (ev.status && ev.status.type) || {};
+  const state = t.state || "pre";                    // pre | in | post
+  const detail = t.shortDetail || t.detail || "";    // e.g. "Final", "Q3 4:12", "Sun 1:00 PM ET"
+  return { state, detail, completed: !!t.completed };
+}
+
+// NFL schedule for a SPECIFIC week (single-sourced from the live week so the label + games match).
+// seasontype: 1=pre, 2=regular, 3=post. Captures opponent, kickoff, status, and score.
+// Honesty: anything the feed doesn't provide stays null/TBD — never fabricated.
+async function loadNflSchedule(season, week, seasonType){
+  const st = seasonType==="post" ? 3 : (seasonType==="pre" ? 1 : 2);
+  const url = `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard`
+            + `?seasontype=${st}&week=${encodeURIComponent(week||1)}&dates=${encodeURIComponent(season)}`;
   try{
-    const d = await getJSONraw(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${season}`);
+    const d = await getJSONraw(url);
     const map={};
     (d.events||[]).forEach(ev=>{
       const c=(ev.competitions&&ev.competitions[0])||{}; const comp=c.competitors||[];
       const home=comp.find(x=>x.homeAway==="home"), away=comp.find(x=>x.homeAway==="away");
       if(!home||!away) return;
       const ha=home.team.abbreviation, aa=away.team.abbreviation, iso=ev.date;
-      map[ha]={ opp:"vs "+aa, kickoff:iso };
-      map[aa]={ opp:"@ "+ha, kickoff:iso };
+      const gs = parseGameStatus(ev);
+      const hs = (home.score!=null)?Number(home.score):null, as_ = (away.score!=null)?Number(away.score):null;
+      // per-team record: opponent, kickoff, status, and this team's/opp's score
+      map[ha]={ opp:"vs "+aa, kickoff:iso, state:gs.state, statusDetail:gs.detail, completed:gs.completed, teamScore:hs, oppScore:as_, oppAbbr:aa };
+      map[aa]={ opp:"@ "+ha, kickoff:iso, state:gs.state, statusDetail:gs.detail, completed:gs.completed, teamScore:as_, oppScore:hs, oppAbbr:ha };
     });
     return map;
   }catch(e){ return {}; }
@@ -881,7 +919,9 @@ function buildAllMyPlayers(allLeagues, sched){
     const g = r.team ? sched[r.team] : null;
     // leagues this player is on, in the user's priority order
     const lgs = [...r.leagues].sort((a,b)=> leagueRank(a)-leagueRank(b) || String(a).localeCompare(String(b)));
-    return { ...r, leagues:lgs, startSet:r.startSet, oppText:(g?g.opp:"TBD"), kickoff:(g?g.kickoff:null) };
+    return { ...r, leagues:lgs, startSet:r.startSet, oppText:(g?g.opp:"TBD"), kickoff:(g?g.kickoff:null),
+             gstate:(g?g.state:null), statusDetail:(g?g.statusDetail:null), completed:(g?!!g.completed:false),
+             teamScore:(g&&g.teamScore!=null?g.teamScore:null), oppScore:(g&&g.oppScore!=null?g.oppScore:null) };
   });
   // tag each player with its game window + matchup key (used for grouping)
   list.forEach(p=>{ p.window = classifyWindow(p.kickoff); });
@@ -899,6 +939,17 @@ function groupByWindow(list){
   return { groups, order };
 }
 
+// game status chip: Final (w/ score) · LIVE (w/ score) · kickoff time · TBD. Never fabricated.
+function gameStatusChip(p){
+  if(!p.kickoff && !p.gstate) return `<span class="gst tbd">TBD</span>`;
+  const score = (p.teamScore!=null && p.oppScore!=null) ? ` ${p.teamScore}–${p.oppScore}` : "";
+  if(p.gstate==="post" || p.completed) return `<span class="gst final" title="Final">✓ Final${esc(score)}</span>`;
+  if(p.gstate==="in")                  return `<span class="gst live" title="${esc(p.statusDetail||"In progress")}">● LIVE${esc(score)}</span>`;
+  return `<span class="gst pre">${esc(fmtKick(p.kickoff))}</span>`; // scheduled
+}
+// is this player's game still upcoming (for the "Upcoming only" filter)?
+function isUpcoming(p){ return !(p.gstate==="post" || p.completed || p.gstate==="in"); }
+
 function ampPlayerRow(p){
   const leaguesLbl = p.leagues.length>1 ? `${p.leagues.length} leagues` : (p.leagues[0]||"—");
   // expanded body: each league this player is on (priority order), ▶ marks where you START them
@@ -907,21 +958,36 @@ function ampPlayerRow(p){
     const starts = startSet.has ? startSet.has(name) : false;
     return `<div class="pl-lg">${starts?`<span class="pl-start" title="You start them here">▶ START</span>`:`<span class="pl-bench">bench</span>`}<span>${esc(name)}</span></div>`;
   }).join("");
-  return `<details class="pl-d">
+  const played = (p.gstate==="post"||p.completed) ? " is-played" : "";
+  return `<details class="pl-d${played}">
     <summary class="pl">
       <span class="slot pos-${esc(p.pos)}" style="background:#0d131c">${esc(p.pos||"?")}</span>
       ${playerImg(p)}
-      <span class="pname">${esc(p.name)} <span class="pmeta">${esc(p.team||"FA")} · ${esc(p.oppText)} · ${esc(fmtKick(p.kickoff))}</span></span>
+      <span class="pname">${esc(p.name)} <span class="pmeta">${esc(p.team||"FA")} · ${esc(p.oppText)} · ${gameStatusChip(p)}</span></span>
       <span class="ppos">${esc(leaguesLbl)}${p.starterIn?` · ▶${p.starterIn}`:""} <span class="pl-caret">▾</span></span>
     </summary>
     <div class="pl-body">${lgLines}</div>
   </details>`;
 }
 
-function renderAllMyPlayers(data){
+// module-level toggle state for All My Players
+let AMP_UPCOMING_ONLY = false;
+let AMP_DATA = null;
+let AMP_WEEK = null;
+
+function renderAllMyPlayers(data, week){
+  AMP_DATA = data;
   if(!data.count) return `<div class="note">No rostered players found.</div>`;
-  const { groups, order } = groupByWindow(data.list);
-  const s=[`<div class="lg-meta" style="margin-bottom:10px">${data.count} unique players across all your leagues · grouped by game window</div>`];
+  let list = data.list;
+  if(AMP_UPCOMING_ONLY) list = list.filter(isUpcoming);
+  const { groups, order } = groupByWindow(list);
+  const wkLbl = week ? `Week ${esc(String(week))}` : "This week";
+  const shown = list.length;
+  const s=[`<div class="amp-head">
+      <div class="amp-wk">${wkLbl} <span class="amp-sub">· grouped by game window · ${shown}${AMP_UPCOMING_ONLY?` of ${data.count}`:""} players</span></div>
+      <label class="amp-toggle"><input type="checkbox" id="ampUpcoming" ${AMP_UPCOMING_ONLY?"checked":""}> Upcoming only</label>
+    </div>`];
+  if(!order.length){ s.push(`<div class="note">No games left this week for your players.</div>`); return s.join(""); }
   order.forEach(w=>{
     s.push(`<div class="sh">${esc(w)} <span class="grp-n">${groups[w].length}</span></div><div class="roster">`);
     groups[w].forEach(p=> s.push(ampPlayerRow(p)));
@@ -967,14 +1033,17 @@ async function boot(){
   box.innerHTML = `<div class="loading">Loading your leagues…</div>`;
   const errors=[];
 
-  // load Sleeper + ESPN + the NFL schedule in parallel
+  // 1) resolve the live NFL week FIRST (single source), so the schedule + label always match.
+  const nfl = await loadNflState();
+  // 2) load providers + the week-scoped schedule in parallel.
   const [sleeperRes, espnRes, sched] = await Promise.all([
-    providers.sleeper.load().catch(e=>{ errors.push("Sleeper: "+e.message); return {week:1,out:[]}; }),
-    CONFIG.espn.enabled ? providers.espn.load().catch(e=>{ errors.push("ESPN: "+e.message); return {week:1,out:[]}; }) : Promise.resolve({week:1,out:[]}),
-    loadNflSchedule(CONFIG.sleeper.season),
+    providers.sleeper.load().catch(e=>{ errors.push("Sleeper: "+e.message); return {week:nfl.week,out:[]}; }),
+    CONFIG.espn.enabled ? providers.espn.load().catch(e=>{ errors.push("ESPN: "+e.message); return {week:nfl.week,out:[]}; }) : Promise.resolve({week:nfl.week,out:[]}),
+    loadNflSchedule(nfl.season, nfl.week, nfl.seasonType),
   ]);
 
-  const week = sleeperRes.week || espnRes.week || 1;
+  // labeled week comes from the single NFL-state source (auto-advances)
+  const week = nfl.week;
   // order by user-defined league priority everywhere (cards + all-my-players)
   const allLeagues = sortByPriority([...sleeperRes.out, ...espnRes.out]);
   const okLeagues = allLeagues.filter(L=>L.me && !L.error && !L.authExpired);
@@ -989,11 +1058,16 @@ async function boot(){
   box.innerHTML = crossTabsShell();
   document.getElementById("tt-leagues").innerHTML = allLeagues.map((L,i)=>leagueCard(L,i)).join("") || `<div class="note">No leagues loaded.</div>`;
 
-  // D1 — all my players (built from whatever loaded)
+  // D1 — all my players (built from whatever loaded). Week is single-sourced from NFL state.
   const amp = buildAllMyPlayers(okLeagues, sched);
-  document.getElementById("tt-players").innerHTML =
-    `<div class="card">${renderAllMyPlayers(amp)}
-     <div class="an-skip" style="margin-top:12px"><b>Note:</b> opponent + kickoff come from the NFL schedule; players on a bye or with an unscheduled game show <b>TBD</b> (never guessed).</div></div>`;
+  AMP_WEEK = week;
+  function paintAMP(){
+    document.getElementById("tt-players").innerHTML =
+      `<div class="card">${renderAllMyPlayers(amp, AMP_WEEK)}
+       <div class="an-skip" style="margin-top:12px"><b>Note:</b> week auto-tracks the live NFL week; opponent/kickoff/score come from the NFL scoreboard for that week. Players on a bye or an unscheduled game show <b>TBD</b> (never guessed). Final scores/live status appear once games start.</div></div>`;
+  }
+  paintAMP();
+  window.__paintAMP = paintAMP; // used by the "Upcoming only" toggle handler
 
   // D2 — available / pickups (Sleeper leagues use trending-adds + rostered-set; ESPN gets a note)
   const trending = await loadSleeperTrending();
@@ -1042,6 +1116,14 @@ function renderAvailable(sleeperLeagues, espnLeagues, trending){
   }
   return s.join("");
 }
+
+// "Upcoming only" toggle on All My Players — re-render that pane in place
+document.addEventListener("change", e=>{
+  if(e.target && e.target.id==="ampUpcoming"){
+    AMP_UPCOMING_ONLY = e.target.checked;
+    if(window.__paintAMP) window.__paintAMP();
+  }
+});
 
 // top-level tab switching
 document.addEventListener("click", e=>{
