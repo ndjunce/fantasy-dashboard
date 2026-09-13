@@ -52,6 +52,18 @@
 
   .sh{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);font-weight:800;margin:14px 0 8px}
   .grp-n{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;background:#0d131c;border:1px solid var(--line);color:var(--mut);font-size:10px;font-weight:800}
+  /* All-My-Players expandable row: tap to see which leagues (priority order) */
+  .pl-d{border-radius:9px}
+  .pl-d>summary{cursor:pointer;list-style:none}
+  .pl-d>summary::-webkit-details-marker{display:none}
+  .pl-d[open]>summary{border-bottom-left-radius:0;border-bottom-right-radius:0}
+  .pl-caret{display:inline-block;color:var(--mut);font-size:10px;transition:transform .15s;margin-left:2px}
+  .pl-d[open] .pl-caret{transform:rotate(180deg)}
+  .pl-body{display:flex;flex-direction:column;gap:4px;padding:8px 12px 10px 12px;
+           background:var(--bg);border:1px solid var(--line);border-top:none;border-radius:0 0 9px 9px;margin-top:-3px}
+  .pl-lg{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}
+  .pl-start{font-size:10px;font-weight:800;color:var(--grn);background:rgba(51,224,138,.12);border:1px solid var(--grn);border-radius:6px;padding:1px 6px;white-space:nowrap}
+  .pl-bench{font-size:10px;font-weight:800;color:var(--mut);background:#0d131c;border:1px solid var(--line);border-radius:6px;padding:1px 6px;white-space:nowrap}
   .roster{display:flex;flex-direction:column;gap:3px}
   .pl{display:grid;grid-template-columns:46px 28px 1fr auto;gap:10px;align-items:center;
       padding:7px 10px;background:var(--bg);border:1px solid var(--line);border-radius:9px}
@@ -860,14 +872,16 @@ function buildAllMyPlayers(allLeagues, sched){
                   ...(L.me.bench||[]).map(b=>({...b.player, starter:false}))].filter(p=>p&&p.name);
     mine.forEach(p=>{
       const key = (p.name||"").toLowerCase()+"|"+(p.pos||"");
-      const rec = byPlayer[key] || (byPlayer[key]={ name:p.name, pos:p.pos, team:p.team, leagues:new Set(), starterIn:0, total:0 });
-      rec.leagues.add(L.name); rec.total++; if(p.starter) rec.starterIn++;
+      const rec = byPlayer[key] || (byPlayer[key]={ name:p.name, pos:p.pos, team:p.team, leagues:new Set(), startSet:new Set(), starterIn:0, total:0 });
+      rec.leagues.add(L.name); rec.total++; if(p.starter){ rec.starterIn++; rec.startSet.add(L.name); }
       if(!rec.team && p.team) rec.team=p.team;
     });
   });
   const list = Object.values(byPlayer).map(r=>{
     const g = r.team ? sched[r.team] : null;
-    return { ...r, leagues:[...r.leagues], oppText:(g?g.opp:"TBD"), kickoff:(g?g.kickoff:null) };
+    // leagues this player is on, in the user's priority order
+    const lgs = [...r.leagues].sort((a,b)=> leagueRank(a)-leagueRank(b) || String(a).localeCompare(String(b)));
+    return { ...r, leagues:lgs, startSet:r.startSet, oppText:(g?g.opp:"TBD"), kickoff:(g?g.kickoff:null) };
   });
   // tag each player with its game window + matchup key (used for grouping)
   list.forEach(p=>{ p.window = classifyWindow(p.kickoff); });
@@ -886,13 +900,22 @@ function groupByWindow(list){
 }
 
 function ampPlayerRow(p){
-  const leagues = p.leagues.length>1 ? `${p.leagues.length} leagues` : p.leagues[0];
-  return `<div class="pl">
-    <span class="slot pos-${esc(p.pos)}" style="background:#0d131c">${esc(p.pos||"?")}</span>
-    ${playerImg(p)}
-    <span class="pname">${esc(p.name)} <span class="pmeta">${esc(p.team||"FA")} · ${esc(p.oppText)} · ${esc(fmtKick(p.kickoff))}</span></span>
-    <span class="ppos" title="${esc(p.leagues.join(", "))}">${esc(leagues)}${p.starterIn?` · ▶${p.starterIn}`:""}</span>
-  </div>`;
+  const leaguesLbl = p.leagues.length>1 ? `${p.leagues.length} leagues` : (p.leagues[0]||"—");
+  // expanded body: each league this player is on (priority order), ▶ marks where you START them
+  const startSet = p.startSet || new Set();
+  const lgLines = p.leagues.map(name=>{
+    const starts = startSet.has ? startSet.has(name) : false;
+    return `<div class="pl-lg">${starts?`<span class="pl-start" title="You start them here">▶ START</span>`:`<span class="pl-bench">bench</span>`}<span>${esc(name)}</span></div>`;
+  }).join("");
+  return `<details class="pl-d">
+    <summary class="pl">
+      <span class="slot pos-${esc(p.pos)}" style="background:#0d131c">${esc(p.pos||"?")}</span>
+      ${playerImg(p)}
+      <span class="pname">${esc(p.name)} <span class="pmeta">${esc(p.team||"FA")} · ${esc(p.oppText)} · ${esc(fmtKick(p.kickoff))}</span></span>
+      <span class="ppos">${esc(leaguesLbl)}${p.starterIn?` · ▶${p.starterIn}`:""} <span class="pl-caret">▾</span></span>
+    </summary>
+    <div class="pl-body">${lgLines}</div>
+  </details>`;
 }
 
 function renderAllMyPlayers(data){
