@@ -83,3 +83,25 @@ Phase 2 deploy was live but the frontend pointed at the WRONG Vercel URL, so Git
 **Freeze point before this change:** tag `good-dashboard-pre-espn-url` → f9d7068 (pushed). Roll back there if needed.
 
 **Honest limitations (unchanged, pre-existing):** no Start/Sit view exists in this dashboard (weekly_start_sit.py lives in fantasy_football_project, not wired here — would be a new build + needs model-as-API, not a Sunday item); ESPN weekly points show 0 until kickoff; ESPN per-league free-agent list still deferred (D2 uses Sleeper leaguewide trending-adds, honestly labeled "not a projection").
+
+## 2026-08-13 — Feature 1: player images w/ headshot → team-logo → initial fallback — WORKS
+Player rows were text-only (no images). Added a player image to every row via the single `playerRow()` render point.
+
+**Fallback chain (per player):**
+1. ESPN headshot CDN by espn player id: `a.espncdn.com/i/headshots/nfl/players/full/{espnId}.png`.
+2. On headshot error → team logo `a.espncdn.com/i/teamlogos/nfl/500/scoreboard/{team}.png` on a white circular chip w/ dark ring (reused picks-site `.logo` pattern so dark team marks — NYG/BAL/CHI/NE/JAX/LV — stay readable on the dark bg).
+3. On logo error / no team → position-colored initial circle.
+- 28px round (26px on mobile). `loading="lazy"`. All fallbacks are client-side `onerror` swaps — zero extra cost to us; images come from ESPN's public CDN.
+
+**Data plumbing:**
+- ESPN player `id` IS the espn id → `espnId` set directly in `playerOf()`; headshots resolve reliably for all 6 ESPN leagues.
+- Sleeper: extended the slim player cache to carry `espn_id` (key `e`); bumped cache key `sleeper_players_nfl_v1`→`v2` so stale caches refresh. `resolvePlayer()` now passes `espnId`. **Honest limitation (verified):** Sleeper's `espn_id` is present for many but NOT all players (e.g. Puka Nacua row had none; "Josh Allen" full-name lookup is ambiguous with the OL). Those degrade to team logo — exactly the intended fallback. Partial headshot coverage on Sleeper, full logo coverage.
+
+**Verified before push:** CDN patterns return 200 image/png (headshot 3929630 ✓, phi/nyg logos ✓); a bogus headshot id returns 404 so the onerror fallback fires. Extracted `<script>` parses clean via `new Function()` (node). 
+**Verified live:** orpin (Vercel, primary bookmark) serves `playerImg()` + `.pimg` CSS + v2 cache key. GitHub Pages copy lagging a few min (normal Pages CDN propagation; same commit).
+
+**Commit `0a48b28`. Freeze point before this:** tag `good-dashboard-9-leagues` → efb99dd (pushed) — roll back there if the images look worse.
+
+**Scope/blast radius:** additive only — 1 CSS block + `playerImg()`/`headshotUrl()`/`teamLogoUrl()` helpers + `.pl` grid 3→4 cols + espn_id plumbing. No data-layer/proxy/league-loading changes. If images fail entirely, rows still render (text untouched).
+
+**Next (NOT started, awaiting user approval of design):** Feature 2 — filter/grouping controls for "All My Players" (position, matchup, game-window early/noon-late-primetime). Game-window grouping is the priority.
