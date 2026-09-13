@@ -64,3 +64,22 @@ Added all 6 ESPN leagues + two cross-league views. Cookie (espn_s2 + SWID) stays
 
 ## 2026-08-13 — DEPLOY Phase 2 to Vercel — OPEN (user action)
 Repo `ndjunce/fantasy-dashboard` gets `api/espn.js` + `vercel.json`. User imports repo to Vercel + sets ESPN_S2/ESPN_SWID env vars (values pasted in Vercel UI by the user, never in chat/git). Live vercel.app URL becomes the ESPN-enabled dashboard (phone + laptop). Update `CONFIG.espn.apiBase` absolute fallback to the real vercel domain if the GitHub Pages copy should also reach ESPN.
+
+## 2026-08-13 — FIXED ESPN apiBase → real Vercel domain; all 9 leagues now reachable — WORKS
+Phase 2 deploy was live but the frontend pointed at the WRONG Vercel URL, so GitHub Pages got "Failed to fetch" on all 6 ESPN leagues.
+
+**Root cause:** `CONFIG.espn.apiBase` absolute fallback was a guessed placeholder `fantasy-dashboard-ndjunce.vercel.app` (returned 404 — that project name doesn't exist). Real production domain is `fantasy-dashboard-orpin.vercel.app` (Vercel account fun-fun-fun1, project fantasy-dashboard). NOT a code/CORS bug — the proxy + Production env vars (ESPN_S2/ESPN_SWID) + cookies were all already correct.
+
+**Fix:** one-line change in `index.html` — apiBase fallback → `https://fantasy-dashboard-orpin.vercel.app/api/espn`. Commit `e3fe8a5`, pushed to main.
+
+**Verified live (2026-08-13):**
+- Proxy returns real data (not auth_expired / not server_not_configured) for all 6 ESPN leagues via `/api/espn?league=..&season=2026`: Royal Crushers 12, Dargelong 12, 2QB/Winona 12, 6-man 6, CAN AM 10, Uncle and Boys 8 teams.
+- CORS: proxy returns `Access-Control-Allow-Origin: https://ndjunce.github.io` for that origin → the GitHub Pages cross-origin fetch will succeed.
+- Sleeper side already live: 3 leagues (8 greasy turds, The Soup Kitchen, Busch Apple Salary Dynasty), all 2026 in_season; trending-adds endpoint 200.
+- Raw github main index.html confirmed contains orpin URL, old placeholder gone.
+
+**Primary bookmark:** `https://fantasy-dashboard-orpin.vercel.app/` — serves the whole dashboard AND reaches ESPN same-origin (no CORS in play). The GitHub Pages copy also works now via the cross-origin proxy (CORS-allowed).
+
+**Freeze point before this change:** tag `good-dashboard-pre-espn-url` → f9d7068 (pushed). Roll back there if needed.
+
+**Honest limitations (unchanged, pre-existing):** no Start/Sit view exists in this dashboard (weekly_start_sit.py lives in fantasy_football_project, not wired here — would be a new build + needs model-as-API, not a Sunday item); ESPN weekly points show 0 until kickoff; ESPN per-league free-agent list still deferred (D2 uses Sleeper leaguewide trending-adds, honestly labeled "not a projection").
