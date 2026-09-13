@@ -145,3 +145,22 @@ Rows were static text ("2 leagues"). Now each player row is a `<details><summary
 - Verified live on orpin (pl-d details + pl-start markers present). JS parses clean; league-order sim correct (CAN AM > Dargelong > The Soup Kitchen).
 **Commit `e529805`.**
 **Remaining for Feature 2:** item 5 (week handling) — INVESTIGATE + propose before coding (user requirement). Not yet started.
+
+## 2026-08-13 — Feature 2 item 5: single-sourced NFL week + game status/score + Upcoming-only — WORKS (visuals pending Sunday)
+**Problem (investigated + reported before coding):** two DISCONNECTED week sources — the "Week N" subhead came from Sleeper `state/nfl` (auto-advances), but the game schedule came from ESPN `scoreboard?dates=YYYY` which returns "whatever week ESPN currently serves" and can't be asked for a specific week. Result: label + games could disagree; "next Thursday" showed because ESPN was already serving the upcoming slate. Also: NO game status was captured (played vs upcoming looked identical; no scores).
+
+**Fix (option a, user-chosen — fix the root, don't paper over):**
+- New `loadNflState()` → live week/season/seasonType from Sleeper (verified: week=1 season=2026 regular). Resolved FIRST in boot(), then providers + schedule load in parallel.
+- `loadNflSchedule(season, week, seasonType)` now requests ESPN scoreboard with explicit `&seasontype={1|2|3}&week=N` → games shown ALWAYS match the labeled week (single source).
+- Captures per-game status via `parseGameStatus` (state pre/in/post + completed + shortDetail) and per-team score. `gameStatusChip()` renders: **✓ Final W–L** (green, muted row) · **● LIVE W–L** (red) · **kickoff time** (scheduled) · **TBD** (no feed data — never fabricated).
+- **"Upcoming only" toggle** (module state `AMP_UPCOMING_ONLY` + delegated change handler + in-place `paintAMP()` re-render) collapses already-played/in-progress games. **"Week N" label** in the AMP header (from the single NFL-state source, auto-advances).
+- Honesty guardrails kept: missing status/score → TBD/scheduled, never guessed; if week can't resolve, falls back gracefully.
+
+**AUTO-ROLL answers (now correct):** week number auto-advances (Sleeper state); schedule auto-follows because it's fetched for THAT week; played-vs-upcoming visually distinct (Final/LIVE/scheduled) + optional filter.
+
+**Testing:** cannot hit ESPN scoreboard server-side (Akamai 403s non-browser/datacenter origins — confirmed). So unit-tested the LOGIC against saved sample scoreboard payloads (pre/in/post) via node: **13/13 pass** — scheduled→kickoff+upcoming, in→LIVE+score+not-upcoming, post→Final+score (correct per-team score orientation home vs away)+not-upcoming, unknown→TBD+upcoming, window classification intact, URL builds explicit seasontype&week. `<script>` parses clean. Verified live on orpin: loadNflState / week-param schedule / gameStatusChip / toggle / Week-label all present.
+**KNOWN-PENDING (honest):** played-game VISUALS (Final/LIVE styling) can't be fully verified until real games go Final — user will eyeball Sunday afternoon. Cosmetic: `fmtKick` clock label renders in viewer's local tz (correct/intended); bucketing forces ET (tz-correct).
+
+**Commit `4eadc94`. Freeze before this batch:** tag `good-dashboard-2b-items1-4` → 4f78635.
+
+## Feature 2 COMPLETE (items 1-5 all shipped + verified live on orpin). Next: option 2 — opponent lineup + borrowed projections.
