@@ -129,3 +129,12 @@ Thursday Night · Sunday Morning / Intl (<12:00 ET, e.g. 9:30 London) · Sunday 
 **Scope/blast radius:** only the All-My-Players tab grouping + boot() league sort + the one Available-tab cache-key fix. ESPN proxy, league loading, D2 logic untouched.
 
 **Next (NOT started, awaiting user go):** Feature 2b — position grouping mode; then 2c — matchup grouping; then the position/league/starters FILTER control bar. Grouping modes order: game-window(default) → position → matchup.
+
+## 2026-08-13 — Feature 2 fixes items 1-3 (Available/Pickups tab) — WORKS
+**Root cause (items 1 & 2, same bug — my Feature-1 regression):** Feature 1 changed the shared `.pl` grid from 3 cols (46px 1fr auto) to 4 cols (46px **28px** 1fr auto) to add the player image, but the Available-tab row template was never updated. With no image `<span>`, the player NAME fell into the fixed 28px image column and got CSS-truncated to a single char → "M…"/"K…"/"C…". 
+- **Proven, not guessed:** live check showed trending ids DO resolve to full names in the Sleeper dict (Michael **M**ayer / **K**aelon Black / **C**hris Bell = the exact initials seen) — so names were fine; the column was the problem.
+- **Fix:** added `playerImg(a)` to the Available row (fills the image column → name flows to 1fr) — fixes BOTH the truncation (item 1) and the missing images (item 2). Pulled `espn_id` into the available-player object so headshots resolve; players w/o espn_id (Mayer/Tucker/Fields verified) fall back to team logo, as designed.
+**Item 3:** Available leagues now `sortByPriority(sleeperLeagues)` → user league order (was showing "8 greasy turds" first).
+- Verified live on orpin: avail rows have playerImg + espn_id pull + priority sort. JS parses clean (node).
+**Commit `fa3c427`. Freeze before this batch:** tag `good-dashboard-2a` → f3a342d.
+**Lesson logged:** when changing a SHARED layout (.pl grid), audit ALL row templates that use it — AMP + Available + league rosters. Missed Available in Feature 1.
