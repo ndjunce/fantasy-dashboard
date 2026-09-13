@@ -51,6 +51,7 @@
   .mu-lead .mu-pts{color:var(--grn)}
 
   .sh{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);font-weight:800;margin:14px 0 8px}
+  .grp-n{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;background:#0d131c;border:1px solid var(--line);color:var(--mut);font-size:10px;font-weight:800}
   .roster{display:flex;flex-direction:column;gap:3px}
   .pl{display:grid;grid-template-columns:46px 28px 1fr auto;gap:10px;align-items:center;
       padding:7px 10px;background:var(--bg);border:1px solid var(--line);border-radius:9px}
@@ -799,6 +800,57 @@ function fmtKick(iso){
 function dayKey(iso){ if(!iso) return "TBD"; const d=new Date(iso); if(isNaN(d)) return "TBD";
   try{ return new Intl.DateTimeFormat("en-US",{weekday:"long",month:"short",day:"numeric"}).format(d); }catch(e){ return "TBD"; } }
 
+// ---- league priority order (user-defined; applies to cards + all-my-players) ----
+// Yahoo leagues (KFL #4, Guillotine #10) aren't loaded yet but are slotted for when they are.
+const LEAGUE_PRIORITY = [
+  "can am", "royal crushers", "busch apple salary dynasty", "kfl",
+  "uncle and boys", "2qb / winona", "dargelong", "6-man",
+  "the soup kitchen", "guillotine",
+];
+function leagueRank(name){
+  const n = String(name||"").trim().toLowerCase();
+  // exact match first, then a loose contains-match so minor name variations still slot correctly
+  let i = LEAGUE_PRIORITY.indexOf(n);
+  if(i<0) i = LEAGUE_PRIORITY.findIndex(k => n.includes(k) || k.includes(n));
+  return i<0 ? 999 : i;
+}
+function sortByPriority(leagues){
+  return leagues.slice().sort((a,b)=>{
+    const r = leagueRank(a.name)-leagueRank(b.name);
+    return r!==0 ? r : String(a.name||"").localeCompare(String(b.name||""));
+  });
+}
+
+// ---- game-window classification (from kickoff ISO, US Eastern) ----
+// Buckets map to when lineups get set. Anything unscheduled -> Other/TBD (never faked).
+const WINDOW_ORDER = [
+  "Thursday Night", "Sunday Morning / Intl", "Sunday Early (1:00 ET)",
+  "Sunday Late Afternoon", "Sunday Night", "Monday Night", "Other / TBD / Bye",
+];
+function classifyWindow(iso){
+  if(!iso) return "Other / TBD / Bye";
+  const d = new Date(iso); if(isNaN(d)) return "Other / TBD / Bye";
+  // Convert to US Eastern parts (handles EDT/EST) via Intl, avoiding local-tz drift.
+  let dow, hour, min;
+  try{
+    const parts = new Intl.DateTimeFormat("en-US",{ timeZone:"America/New_York",
+      weekday:"short", hour:"2-digit", minute:"2-digit", hour12:false }).formatToParts(d);
+    dow = parts.find(p=>p.type==="weekday").value;      // Thu / Sun / Mon ...
+    hour = parseInt(parts.find(p=>p.type==="hour").value,10);
+    min = parseInt(parts.find(p=>p.type==="minute").value,10);
+  }catch(e){ return "Other / TBD / Bye"; }
+  const t = hour*60 + min; // minutes since ET midnight
+  if(dow==="Thu") return "Thursday Night";
+  if(dow==="Mon") return "Monday Night";
+  if(dow==="Sun"){
+    if(t < 12*60)        return "Sunday Morning / Intl";      // before noon ET (e.g. 9:30 London)
+    if(t < 15*60)        return "Sunday Early (1:00 ET)";     // ~1:00 pm slot
+    if(t < 18*60+15)     return "Sunday Late Afternoon";      // 4:05 / 4:25 pm
+    return "Sunday Night";                                     // 8:20 SNF
+  }
+  return "Other / TBD / Bye"; // Fri/Sat/holiday specials -> honest catch-all
+}
+
 // D1 — every rostered player across ALL leagues, deduped, w/ which leagues + this week's game.
 function buildAllMyPlayers(allLeagues, sched){
   const byPlayer={}; // key: name|pos|team -> {name,pos,team, leagues:Set, kickoff}
@@ -817,31 +869,39 @@ function buildAllMyPlayers(allLeagues, sched){
     const g = r.team ? sched[r.team] : null;
     return { ...r, leagues:[...r.leagues], oppText:(g?g.opp:"TBD"), kickoff:(g?g.kickoff:null) };
   });
-  // group by day/time slot
-  const groups={};
-  list.forEach(p=>{ const k = p.kickoff?dayKey(p.kickoff):"TBD / bye"; (groups[k]=groups[k]||[]).push(p); });
-  // order groups by kickoff time; TBD last
-  const order = Object.keys(groups).sort((a,b)=>{
-    const ta = groups[a][0].kickoff?new Date(groups[a][0].kickoff).getTime():Infinity;
-    const tb = groups[b][0].kickoff?new Date(groups[b][0].kickoff).getTime():Infinity;
-    return ta-tb;
-  });
-  order.forEach(k=> groups[k].sort((a,b)=> (a.kickoff&&b.kickoff)?(new Date(a.kickoff)-new Date(b.kickoff)):0 || a.name.localeCompare(b.name)));
-  return { groups, order, count:list.length };
+  // tag each player with its game window + matchup key (used for grouping)
+  list.forEach(p=>{ p.window = classifyWindow(p.kickoff); });
+  // keep the flat list so future filter modes can regroup without a refetch
+  return { list, count:list.length };
 }
+
+// group the flat list by game window, in the fixed lineup-setting order (empty buckets skipped)
+function groupByWindow(list){
+  const groups={};
+  list.forEach(p=>{ (groups[p.window]=groups[p.window]||[]).push(p); });
+  const order = WINDOW_ORDER.filter(w=>groups[w]);
+  order.forEach(w=> groups[w].sort((a,b)=>
+    ((a.kickoff&&b.kickoff)?(new Date(a.kickoff)-new Date(b.kickoff)):0) || a.name.localeCompare(b.name)));
+  return { groups, order };
+}
+
+function ampPlayerRow(p){
+  const leagues = p.leagues.length>1 ? `${p.leagues.length} leagues` : p.leagues[0];
+  return `<div class="pl">
+    <span class="slot pos-${esc(p.pos)}" style="background:#0d131c">${esc(p.pos||"?")}</span>
+    ${playerImg(p)}
+    <span class="pname">${esc(p.name)} <span class="pmeta">${esc(p.team||"FA")} · ${esc(p.oppText)} · ${esc(fmtKick(p.kickoff))}</span></span>
+    <span class="ppos" title="${esc(p.leagues.join(", "))}">${esc(leagues)}${p.starterIn?` · ▶${p.starterIn}`:""}</span>
+  </div>`;
+}
+
 function renderAllMyPlayers(data){
   if(!data.count) return `<div class="note">No rostered players found.</div>`;
-  const s=[`<div class="lg-meta" style="margin-bottom:10px">${data.count} unique players across all your leagues · grouped by kickoff</div>`];
-  data.order.forEach(k=>{
-    s.push(`<div class="sh">${esc(k)}</div><div class="roster">`);
-    data.groups[k].forEach(p=>{
-      const leagues = p.leagues.length>1 ? `${p.leagues.length} leagues` : p.leagues[0];
-      s.push(`<div class="pl">
-        <span class="slot pos-${esc(p.pos)}" style="background:#0d131c">${esc(p.pos||"?")}</span>
-        <span class="pname">${esc(p.name)} <span class="pmeta">${esc(p.team||"FA")} · ${esc(p.oppText)} · ${esc(fmtKick(p.kickoff))}</span></span>
-        <span class="ppos" title="${esc(p.leagues.join(", "))}">${esc(leagues)}${p.starterIn?` · ▶${p.starterIn}`:""}</span>
-      </div>`);
-    });
+  const { groups, order } = groupByWindow(data.list);
+  const s=[`<div class="lg-meta" style="margin-bottom:10px">${data.count} unique players across all your leagues · grouped by game window</div>`];
+  order.forEach(w=>{
+    s.push(`<div class="sh">${esc(w)} <span class="grp-n">${groups[w].length}</span></div><div class="roster">`);
+    groups[w].forEach(p=> s.push(ampPlayerRow(p)));
     s.push(`</div>`);
   });
   return s.join("");
@@ -892,7 +952,8 @@ async function boot(){
   ]);
 
   const week = sleeperRes.week || espnRes.week || 1;
-  const allLeagues = [...sleeperRes.out, ...espnRes.out];
+  // order by user-defined league priority everywhere (cards + all-my-players)
+  const allLeagues = sortByPriority([...sleeperRes.out, ...espnRes.out]);
   const okLeagues = allLeagues.filter(L=>L.me && !L.error && !L.authExpired);
 
   const nSleeper = sleeperRes.out.length, nEspn = espnRes.out.length;
@@ -924,7 +985,7 @@ function renderAvailable(sleeperLeagues, espnLeagues, trending){
   s.push(`<div class="card"><div class="an-skip"><b>What this is:</b> a "who's available + trending + where you're thin" list — <b>not a projection</b>. Ranking = leaguewide trending adds (Sleeper) + your position needs. Scoring-based ranking fills in once games are played.</div></div>`);
   // build a trending lookup (player_id -> add count) + resolve names from the Sleeper cache
   const trendCount={}; (trending||[]).forEach(t=>trendCount[String(t.player_id)]=t.count);
-  let pmap=null; try{ pmap=JSON.parse(localStorage.getItem("sleeper_players_nfl_v1")||"null"); }catch(e){}
+  let pmap=null; try{ pmap=JSON.parse(localStorage.getItem("sleeper_players_nfl_v2")||"null"); }catch(e){}
 
   sleeperLeagues.forEach(L=>{
     if(!L.me || !L.teams) return;
