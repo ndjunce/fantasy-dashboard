@@ -189,3 +189,13 @@ User approved the plan + approach but deferred building it to focus on resume/jo
 - Build order: 2-opt-A (opp starters into matchup obj both providers + extract ESPN weekly proj into player.projPts + side-by-side render) → 2-opt-B (actual-vs-projected + favored summary once games live).
 - **Test note:** can't hit ESPN server-side (Akamai 403) but the proxy can (that's how Jeanty 18.02 was confirmed). Unit-test extraction+total math vs saved payloads; user eyeballs live.
 - **Freeze tag when resumed:** start from `good-dashboard-opt2-start` / current `good-dashboard-pre-filters` lineage.
+
+## 2026-08-13 — Feature 2 GROUPING MODES (2b position + 2c by-game) — WORKS. FEATURE 2 TRULY COMPLETE.
+The two grouping modes from the original Feature 2 design were never built (only game-window shipped). Added a "Group by" selector: **Game window (default) / By game / Position**, composing with all filters + toggles.
+- **2c By game (the one most wanted):** groups all my players in the SAME NFL game under one header ("SEA vs SF" + kickoff), for spotting when one game covers multiple roster spots / stacks. **Stable matchup key** = sorted team pair (`[team,opp].sort().join("__")`) so a player and their opponent-team teammates land in ONE group regardless of home/away. Games ordered by kickoff (TBD last); starters first within a game. Added `oppAbbr` + `matchupKey`/`matchupLabel` to each player in `buildAllMyPlayers`.
+- **2b Position:** QB/RB/WR/TE/K/DEF/DL/LB/DB headers (present-only, fixed order), alpha within.
+- `groupPlayers(list,mode)` dispatcher; `AMP_GROUP` state; `ampGroup` select wired in change handler. Clear button resets FILTERS only (leaves grouping mode) — correct. Dynamic subhead label ("by game" / "by position" / "by game window").
+- **Unit-tested (node): 13/13** — matchup-key stability (SF+SEA players → one group), kickoff ordering, TBD bucket, position order, dispatcher routing + default, wiring. (Two initial test "fails" were my wrong assertions — unsorted matchup key + test data missing p.window — code was correct; fixed the test.) `<script>` parses clean. Verified live on orpin (all 6 markers).
+- **Commit `38b1bc2`. Freeze before this:** tag `good-dashboard-pre-groupmodes` → 1db30e7.
+
+### FEATURE 2 NOW TRULY COMPLETE — full original design shipped: game-window grouping + BY-GAME + BY-POSITION grouping modes, tap-to-expand league detail, single-sourced week + game status/score, and position/league/starters/upcoming filters. All live + verified on https://fantasy-dashboard-orpin.vercel.app/. DASHBOARD WORK STOPS HERE — pivoting to resume/job. Option 2 (opponent lineup + borrowed ESPN projections) remains the approved-for-later backlog item.
