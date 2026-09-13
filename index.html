@@ -987,14 +987,14 @@ function renderAvailable(sleeperLeagues, espnLeagues, trending){
   const trendCount={}; (trending||[]).forEach(t=>trendCount[String(t.player_id)]=t.count);
   let pmap=null; try{ pmap=JSON.parse(localStorage.getItem("sleeper_players_nfl_v2")||"null"); }catch(e){}
 
-  sleeperLeagues.forEach(L=>{
+  sortByPriority(sleeperLeagues).forEach(L=>{
     if(!L.me || !L.teams) return;
     const rostered=new Set(); L.teams.forEach(t=>(t.players||[]).forEach(pid=>rostered.add(String(pid))));
     const need = myPositionNeed(L);
     // available trending = trending players not rostered in THIS league
     const avail = (trending||[]).filter(t=>!rostered.has(String(t.player_id)))
       .map(t=>{ const p=pmap?pmap[String(t.player_id)]:null;
-        return { name:p?p.n:("#"+t.player_id), pos:p?p.p:"", team:p?p.t:"", adds:t.count, needFlag: p&&need[p.p] }; })
+        return { name:p?p.n:("#"+t.player_id), pos:p?p.p:"", team:p?p.t:"", espnId:p?(p.e||""):"", adds:t.count, needFlag: p&&need[p.p] }; })
       .filter(x=>x.pos)
       .sort((a,b)=> (b.needFlag-a.needFlag) || (b.adds-a.adds))
       .slice(0,15);
@@ -1004,6 +1004,7 @@ function renderAvailable(sleeperLeagues, espnLeagues, trending){
       <div class="roster" style="margin-top:8px">`
       + (avail.length? avail.map(a=>`<div class="pl">
           <span class="slot pos-${esc(a.pos)}" style="background:#0d131c">${esc(a.pos)}</span>
+          ${playerImg(a)}
           <span class="pname">${esc(a.name)} <span class="pmeta">${esc(a.team||"FA")}${a.needFlag?" · fills a need":""}</span></span>
           <span class="ppos" title="added in ${a.adds} leagues in last 24h">+${a.adds} 🔥</span>
         </div>`).join("")
