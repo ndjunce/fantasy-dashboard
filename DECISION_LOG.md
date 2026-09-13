@@ -105,3 +105,27 @@ Player rows were text-only (no images). Added a player image to every row via th
 **Scope/blast radius:** additive only — 1 CSS block + `playerImg()`/`headshotUrl()`/`teamLogoUrl()` helpers + `.pl` grid 3→4 cols + espn_id plumbing. No data-layer/proxy/league-loading changes. If images fail entirely, rows still render (text untouched).
 
 **Next (NOT started, awaiting user approval of design):** Feature 2 — filter/grouping controls for "All My Players" (position, matchup, game-window early/noon-late-primetime). Game-window grouping is the priority.
+
+## 2026-08-13 — Feature 2a: game-window grouping for All My Players + league priority order — WORKS
+Grouping-first per user: built game-window grouping ALONE (the priority); position/league/starter FILTERS deferred to a follow-up.
+
+**Game-window buckets (7, user-specified, ET-based) — Sunday early games get their OWN bucket, not folded:**
+Thursday Night · Sunday Morning / Intl (<12:00 ET, e.g. 9:30 London) · Sunday Early (1:00 ET) · Sunday Late Afternoon (4:05/4:25) · Sunday Night (SNF) · Monday Night (MNF) · Other / TBD / Bye.
+- `classifyWindow(iso)` converts kickoff to US-Eastern parts via `Intl.DateTimeFormat(timeZone:"America/New_York")` (handles EDT/EST, avoids local-tz drift), then buckets by day-of-week + ET minutes. Empty buckets skipped; groups render in fixed lineup-setting order; each shows a count badge.
+- **Honesty rule kept:** no kickoff / unscheduled / Fri-Sat specials → "Other / TBD / Bye", never faked. Reused the EXISTING `loadNflSchedule` (ESPN public scoreboard) + kickoff plumbing — did NOT duplicate it (per user).
+- **Unit-tested before push (node):** 9/9 kickoff vectors classify correctly (TNF, 9:30 London, 1pm, 4:05, 4:25, SNF, MNF, Black-Friday→Other, null→Other). `<script>` parses clean via new Function().
+
+**League priority order (user-defined, applies EVERYWHERE leagues list — cards + AMP):**
+`LEAGUE_PRIORITY` array + `leagueRank()`/`sortByPriority()`; `allLeagues` sorted once in boot() so cards + all-my-players both follow it. Order: CAN AM, Royal Crushers, Busch Apple Salary Dynasty, KFL(Yahoo-not-loaded), Uncle and Boys, 2QB/Winona, Dargelong, 6-man, The Soup Kitchen, Guillotine(Yahoo-not-loaded). Loose contains-match so minor name variants still slot; unknown → end. Verified sort output matches the requested order.
+
+**Also (Feature-1 follow-through):** AMP rows now use `playerImg()` (headshot→logo→initial) for visual consistency with league rosters.
+
+**Bug found + fixed in scope (my Feature-1 regression):** the Available/Pickups tab still read `localStorage.getItem("sleeper_players_nfl_v1")` — but Feature 1 bumped the cache key to v2, so it read a stale/empty dict and couldn't resolve trending-add names. Fixed → v2. (Logged per worklog rule: discovered breakage fixed immediately.)
+
+**Verified live (orpin):** classifyWindow / WINDOW_ORDER / LEAGUE_PRIORITY / "grouped by game window" / v2-cache all present in the deployed source.
+
+**Commit `e508968`. Freeze point before this:** tag `good-dashboard-player-images` → 5444fb3 (pushed).
+
+**Scope/blast radius:** only the All-My-Players tab grouping + boot() league sort + the one Available-tab cache-key fix. ESPN proxy, league loading, D2 logic untouched.
+
+**Next (NOT started, awaiting user go):** Feature 2b — position grouping mode; then 2c — matchup grouping; then the position/league/starters FILTER control bar. Grouping modes order: game-window(default) → position → matchup.
