@@ -52,7 +52,7 @@
 
   .sh{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);font-weight:800;margin:14px 0 8px}
   .roster{display:flex;flex-direction:column;gap:3px}
-  .pl{display:grid;grid-template-columns:46px 1fr auto;gap:10px;align-items:center;
+  .pl{display:grid;grid-template-columns:46px 28px 1fr auto;gap:10px;align-items:center;
       padding:7px 10px;background:var(--bg);border:1px solid var(--line);border-radius:9px}
   .pl.bench{background:transparent;border-color:transparent;padding:5px 10px}
   .slot{font-size:10px;font-weight:800;color:var(--mut);text-align:center;background:#0d131c;
@@ -67,6 +67,13 @@
   .pos-QB{color:#f0913e}.pos-RB{color:#33e08a}.pos-WR{color:#4aa8ff}.pos-TE{color:#b878ff}
   .pos-K{color:#95a5a6}.pos-DEF{color:#ff6060}.pos-DL{color:#e0679a}.pos-LB{color:#67c7e0}.pos-DB{color:#c7e067}
   .empty-slot{color:var(--mut);font-style:italic;font-size:13px}
+  /* player image: headshot, team-logo fallback, or initial. 28px round.
+     Logo variant sits on a white chip so dark team marks stay readable (picks-site pattern). */
+  .pimg-wrap{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 28px}
+  .pimg{width:28px;height:28px;border-radius:50%;object-fit:cover;object-position:top center;background:#0d131c;display:block}
+  .pimg.is-logo{object-fit:contain;background:#fff;padding:3px;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+  .pimg-fb{width:28px;height:28px;border-radius:50%;align-items:center;justify-content:center;
+           font-size:13px;font-weight:800;background:#0d131c;border:1px solid var(--line)}
 
   /* standings + all-teams */
   .stand{display:flex;flex-direction:column;gap:4px}
@@ -122,7 +129,8 @@
     .card{padding:12px}
     .lg-name{font-size:16px}
     .mu-team{font-size:12.5px}.mu-pts{font-size:19px}
-    .pl{grid-template-columns:42px 1fr auto;gap:8px;padding:6px 8px}
+    .pl{grid-template-columns:42px 26px 1fr auto;gap:8px;padding:6px 8px}
+    .pimg-wrap,.pimg,.pimg-fb{width:26px;height:26px;flex-basis:26px}
     .pname{font-size:13.5px}
     .st-row{font-size:12.5px}
     .tabs .tab{padding:9px 14px}
@@ -205,7 +213,7 @@ const providers = {};
 
 providers.sleeper = (function(){
   const API = "https://api.sleeper.app/v1";
-  const PK="sleeper_players_nfl_v1", TK="sleeper_players_nfl_ts", TTL=1000*60*60*24;
+  const PK="sleeper_players_nfl_v2", TK="sleeper_players_nfl_ts", TTL=1000*60*60*24;  // v2: slim cache now carries espn_id (e) for headshots
 
   async function loadPlayers(){
     try{ const ts=+(localStorage.getItem(TK)||0), c=localStorage.getItem(PK);
@@ -213,12 +221,12 @@ providers.sleeper = (function(){
     const players = await getJSON(API+"/players/nfl");
     const slim={};
     for(const id in players){ const p=players[id]; if(!p) continue;
-      slim[id]={ n:p.full_name||((p.first_name||"")+" "+(p.last_name||"")).trim()||id, p:p.position||"", t:p.team||"" }; }
+      slim[id]={ n:p.full_name||((p.first_name||"")+" "+(p.last_name||"")).trim()||id, p:p.position||"", t:p.team||"", e:p.espn_id||"" }; }
     try{ localStorage.setItem(PK,JSON.stringify(slim)); localStorage.setItem(TK,String(Date.now())); }catch(e){}
     return slim;
   }
   function resolvePlayer(pmap,id){ if(!id||id==="0"||id===0) return null;
-    const p=pmap[id]; return p?{id,name:p.n,pos:p.p,team:p.t}:{id,name:String(id),pos:"",team:""}; }
+    const p=pmap[id]; return p?{id,name:p.n,pos:p.p,team:p.t,espnId:p.e||""}:{id,name:String(id),pos:"",team:"",espnId:""}; }
   function teamNameOf(u){ return u ? ((u.metadata&&u.metadata.team_name)||u.display_name||"Team") : "Unknown"; }
   function ownerNameOf(u){ return u ? (u.display_name||"?") : "?"; }
   const fptsOf = r => (r.settings.fpts||0) + (r.settings.fpts_decimal? r.settings.fpts_decimal/100 : 0);
@@ -457,8 +465,9 @@ providers.espn = (function(){
 
   function playerOf(entry){
     const p = (entry.playerPoolEntry && entry.playerPoolEntry.player) || entry.player || {};
-    return { id:String(p.id||entry.playerId||""), name:p.fullName||("id "+(entry.playerId||"?")),
-             pos: POS[p.defaultPositionId]||"", team: PRO[p.proTeamId]||"" };
+    const eid = String(p.id||entry.playerId||"");
+    return { id:eid, name:p.fullName||("id "+(entry.playerId||"?")),
+             pos: POS[p.defaultPositionId]||"", team: PRO[p.proTeamId]||"", espnId:eid };
   }
   function buildTeam(t, myTeamId){
     const entries = ((t.roster||{}).entries)||[];
@@ -579,15 +588,43 @@ function salChip(salary, pid){
                  : `<span class="psal verify" title="No auction price (waiver/FA pickup) — floored to $${s.amt}. Verify.">$${s.amt}·?</span>`;
 }
 
+// ---- player image: headshot -> team logo -> initial (fallback chain) ----
+// Headshot from ESPN CDN by espn player id; on error swap to the team logo
+// (white chip, readable on dark bg); if that also fails, show a position-colored initial.
+// Reuses the picks-site logo pattern. All fallbacks are client-side onerror swaps.
+function headshotUrl(espnId){ return `https://a.espncdn.com/i/headshots/nfl/players/full/${espnId}.png`; }
+function teamLogoUrl(team){ return `https://a.espncdn.com/i/teamlogos/nfl/500/scoreboard/${String(team).toLowerCase()}.png`; }
+function playerImg(player){
+  const name = player.name||"";
+  const initial = esc((name.trim()[0]||"?").toUpperCase());
+  const team = (player.team||"").toUpperCase();
+  const pos = esc(player.pos||"");
+  const fbInitial = `<span class="pimg-fb pos-${pos}" style="display:none">${initial}</span>`;
+  // last-resort initial is always in the DOM (hidden); the logo <img> reveals it on error.
+  const logoOnErr = team
+    ? `onerror="this.onerror=null;this.src='${teamLogoUrl(team)}';this.classList.add('is-logo');this.dataset.f='logo';this.addEventListener('error',function(){this.style.display='none';var s=this.parentNode.querySelector('.pimg-fb');if(s)s.style.display='inline-flex';},{once:true});"`
+    : `onerror="this.onerror=null;this.style.display='none';var s=this.parentNode.querySelector('.pimg-fb');if(s)s.style.display='inline-flex';"`;
+  if(player.espnId){
+    return `<span class="pimg-wrap"><img class="pimg" src="${headshotUrl(player.espnId)}" alt="" loading="lazy" ${logoOnErr}>${fbInitial}</span>`;
+  }
+  // no espn id -> skip straight to team logo (or initial if no team)
+  if(team){
+    return `<span class="pimg-wrap"><img class="pimg is-logo" src="${teamLogoUrl(team)}" alt="" loading="lazy" onerror="this.onerror=null;this.style.display='none';var s=this.parentNode.querySelector('.pimg-fb');if(s)s.style.display='inline-flex';">${fbInitial}</span>`;
+  }
+  return `<span class="pimg-wrap"><span class="pimg-fb pos-${pos}" style="display:inline-flex">${initial}</span></span>`;
+}
+
 function playerRow(slot, player, isBench, salary, reserve){
   const cls="pl"+(isBench?" bench":"");
   const slotLbl = reserve ? "IR/TX" : (isBench?"BN":slot);
   if(!player) return `<div class="${cls}"><span class="slot ${esc(slotLbl)}">${esc(slotLbl)}</span>`
+    +`<span class="pimg-wrap empty"></span>`
     +`<span class="pname empty-slot">— empty —</span><span class="ppos"></span></div>`;
   const meta=[player.pos,player.team].filter(Boolean).join(" · ");
   const sal = salChip(salary, player.id);
   return `<div class="${cls}">
     <span class="slot ${esc(slotLbl)}">${esc(slotLbl)}</span>
+    ${playerImg(player)}
     <span class="pname">${esc(player.name)} <span class="pmeta">${esc(meta)}</span></span>
     ${sal || `<span class="ppos pos-${esc(player.pos)}">${esc(player.pos||"")}</span>`}
   </div>`;
