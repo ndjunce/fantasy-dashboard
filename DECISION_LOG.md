@@ -164,3 +164,28 @@ Rows were static text ("2 leagues"). Now each player row is a `<details><summary
 **Commit `4eadc94`. Freeze before this batch:** tag `good-dashboard-2b-items1-4` → 4f78635.
 
 ## Feature 2 COMPLETE (items 1-5 all shipped + verified live on orpin). Next: option 2 — opponent lineup + borrowed projections.
+
+## 2026-08-13 — Feature 2 FILTERS (the original "then add filters" piece) — WORKS
+Finished the filter control bar on All My Players that was deferred when week-handling + option-2 investigation got inserted.
+- **Position dropdown** (only positions present, sensible order QB/RB/WR/TE/K/DEF/DL/LB/DB), **League dropdown** (leagues present, USER PRIORITY order via `ampLeagues`), **Starters-only toggle** (`starterIn>0`). All COMPOSE with the existing **Upcoming-only** toggle + **game-window grouping**. **Clear** button (+ empty-state clear link) appears when any filter active. Live count "X of N players".
+- Client-side only on the flat `AMP_DATA.list`; re-renders in place via `paintAMP()` + delegated change/click handlers. Module state: `AMP_POS / AMP_LEAGUE / AMP_STARTERS_ONLY / AMP_UPCOMING_ONLY`.
+- **Unit-tested (node): 11/11** — each filter, all compositions (WR+starters, league+starters+upcoming, empty result), dropdown ordering (ampPositions, ampLeagues priority), handler wiring. `<script>` parses clean. Verified live on orpin (amp-filters bar + all 3 controls + helper + clear present).
+- **Commit `e42ce9a`. Freeze before this:** tag `good-dashboard-pre-filters` → aa0c2fb.
+
+### DASHBOARD STOPPING POINT (user switching to resume/job work). Feature 1 (player images) + Feature 2 (game-window grouping + tap-to-expand leagues + week single-sourcing + game status/score + filters) all COMPLETE and live on https://fantasy-dashboard-orpin.vercel.app/.
+
+## 2026-08-13 — BACKLOG (approved for LATER, NOT built): Option 2 — opponent lineup + borrowed ESPN projections
+User approved the plan + approach but deferred building it to focus on resume/job work. Captured here so it's not lost.
+
+**Investigation findings (verified live, so the build is de-risked):**
+- **Opponent rosters are ALREADY parsed, just discarded.** Both providers' matchup code already resolves the opponent team object (ESPN: `oppTeam=teams.find(...oppSide.teamId)`; Sleeper: `oppT=teams.find(...oppM.roster_id)`) and `buildTeam` already builds full starters/bench for it. Current code keeps only opp name+total points. Opponent lineup = free, no new fetches.
+- **ESPN projections ALREADY flow through the proxy — verified on live Royal Crushers:** each player's `stats[]` has a weekly projection row `statSourceId=1` (projected) + `statSplitTypeId=1` (weekly) + `scoringPeriodId=<week>` → `appliedTotal` (e.g. Jeanty Wk1 = 18.02). Actual is `statSourceId=0` same week (fills post-kickoff). NO proxy change needed. Covers the 6 ESPN leagues.
+- **Sleeper has NO projections** (API doesn't expose them — already documented in skips). Covers the 3 Sleeper leagues.
+
+**APPROVED APPROACH (build later): 2-A + inline.**
+- 2-A: show borrowed ESPN projections for the 6 ESPN leagues (native scoring, accurate); for the 3 Sleeper leagues show opponent lineup with projection column = "—" + honest note "Sleeper doesn't provide projections." REJECTED 2-B (cross-map Sleeper→ESPN projection via espn_id) because ESPN-scored projections are WRONG for a Sleeper league's different scoring rules = would show a misleading number (violates honesty rule).
+- Inline: expand each league card's existing matchup strip into side-by-side you-vs-opponent starting lineups (Feature-1 player images), per-player `proj X.X` (ESPN), projected side totals + margin ("Projected: You 118.4 – 106.2 (+12.2)"). Once games live: actual-vs-projected side by side (actual already in same payload).
+- **Binding label:** "Projections borrowed from ESPN's own weekly numbers — not our model." No overpromising a JunceBox projection.
+- Build order: 2-opt-A (opp starters into matchup obj both providers + extract ESPN weekly proj into player.projPts + side-by-side render) → 2-opt-B (actual-vs-projected + favored summary once games live).
+- **Test note:** can't hit ESPN server-side (Akamai 403) but the proxy can (that's how Jeanty 18.02 was confirmed). Unit-test extraction+total math vs saved payloads; user eyeballs live.
+- **Freeze tag when resumed:** start from `good-dashboard-opt2-start` / current `good-dashboard-pre-filters` lineage.
