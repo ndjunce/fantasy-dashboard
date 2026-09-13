@@ -138,3 +138,10 @@ Thursday Night · Sunday Morning / Intl (<12:00 ET, e.g. 9:30 London) · Sunday 
 - Verified live on orpin: avail rows have playerImg + espn_id pull + priority sort. JS parses clean (node).
 **Commit `fa3c427`. Freeze before this batch:** tag `good-dashboard-2a` → f3a342d.
 **Lesson logged:** when changing a SHARED layout (.pl grid), audit ALL row templates that use it — AMP + Available + league rosters. Missed Available in Feature 1.
+
+## 2026-08-13 — Feature 2 item 4: All My Players rows are tap-to-expand — WORKS
+Rows were static text ("2 leagues"). Now each player row is a `<details><summary>` — tap to expand and see WHICH leagues they're rostered in, listed in the user's league PRIORITY order, each tagged **▶ START** (green) or **bench** based on where you actually start them.
+- Tracked per-league starter status via a new `startSet` (Set of league names) in `buildAllMyPlayers`; leagues array pre-sorted by `leagueRank()`. Caret rotates on open. Native `<details>` = works on mobile tap, no JS handler.
+- Verified live on orpin (pl-d details + pl-start markers present). JS parses clean; league-order sim correct (CAN AM > Dargelong > The Soup Kitchen).
+**Commit `e529805`.**
+**Remaining for Feature 2:** item 5 (week handling) — INVESTIGATE + propose before coding (user requirement). Not yet started.
